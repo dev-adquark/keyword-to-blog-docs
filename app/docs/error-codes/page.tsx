@@ -28,9 +28,9 @@ const codes = [
   { code: "AUTH_MISSING", status: 401, meaning: "No Authorization header was provided." },
   { code: "AUTH_INVALID", status: 401, meaning: "The API key is malformed, unrecognized, or revoked." },
   { code: "SCOPE_INSUFFICIENT", status: 403, meaning: "The API key is valid but lacks a required scope." },
-  { code: "QUOTA_EXCEEDED", status: 402, meaning: "The plan's monthly word or post quota has been reached." },
-  { code: "RATE_LIMITED", status: 429, meaning: "The plan's requests-per-minute limit was exceeded." },
-  { code: "VALIDATION_ERROR", status: 422, meaning: "The request body failed schema or constraint validation." },
+  { code: "QUOTA_EXCEEDED", status: 429, meaning: "The plan's monthly word or request quota has been reached." },
+  { code: "RATE_LIMITED", status: 429, meaning: "The plan's requests-per-minute or requests-per-day limit was exceeded." },
+  { code: "VALIDATION_ERROR", status: 400, meaning: "The request body failed schema or constraint validation." },
   { code: "PROHIBITED_INPUT", status: 422, meaning: "Input matched a prohibited-content filter and was rejected." },
   { code: "JOB_NOT_FOUND", status: 404, meaning: "No job exists with the given jobId for this account." },
   { code: "JOB_FAILED", status: 200, meaning: "The job record itself reports status: failed (not an HTTP error)." },
@@ -70,7 +70,7 @@ export default function ErrorCodesPage() {
         <div className="mt-3"><JsonBlock data={errorAuthInvalidExample} filename="401" /></div>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Example: quota exceeded</h2>
-        <div className="mt-3"><JsonBlock data={errorQuotaExceededExample} filename="402" /></div>
+        <div className="mt-3"><JsonBlock data={errorQuotaExceededExample} filename="429" /></div>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Example: rate limited</h2>
         <div className="mt-3"><JsonBlock data={errorRateLimitedExample} filename="429" /></div>

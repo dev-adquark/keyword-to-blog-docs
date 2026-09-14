@@ -73,6 +73,8 @@ export async function validateWebhookUrl(rawUrl: string): Promise<boolean> {
   }
 }
 
+const MAX_SIGNATURE_AGE_SECONDS = 5 * 60;
+
 export async function verifyWebhookSignature(
   rawBody: string,
   signature: string | null,
@@ -85,6 +87,9 @@ export async function verifyWebhookSignature(
 
   const [, timestamp, provided] = match;
   if (!timestamp || !provided) return false;
+
+  const age = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));
+  if (!Number.isFinite(age) || age > MAX_SIGNATURE_AGE_SECONDS) return false;
 
   const expected = createHmac("sha256", secret)
     .update(`${timestamp}.${rawBody}`)

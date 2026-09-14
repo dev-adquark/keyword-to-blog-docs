@@ -107,9 +107,8 @@ export const errorProhibitedInputExample = {
 
 export const errorGenerationFailureExample = {
   error: {
-    code: "JOB_FAILED",
-    message: "Generation failed after 3 retries due to an upstream model timeout.",
+    code: "INTERNAL_ERROR",
+    message: "Content generation is temporarily unavailable. Please try again shortly.",
     requestId: "req_33221100dd",
-    details: { retries: 3 },
   },
 } satisfies ErrorResponseV1;

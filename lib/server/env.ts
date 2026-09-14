@@ -31,7 +31,8 @@ export const env = {
     return required("ANTHROPIC_API_KEY");
   },
   get AI_MODEL() {
-    return optional("AI_MODEL", "claude-sonnet-4-5");
+    // Haiku by default — lowest token cost suitable for this product; override via env if needed.
+    return optional("AI_MODEL", "claude-haiku-4-5-20251001");
   },
   get UPSTASH_REDIS_REST_URL() {
     return required("UPSTASH_REDIS_REST_URL");

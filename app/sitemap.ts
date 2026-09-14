@@ -1,8 +1,5 @@
 import type { MetadataRoute } from "next";
-
-const siteUrl = process.env.NEXT_PUBLIC_API_BASE_URL
-  ? process.env.NEXT_PUBLIC_API_BASE_URL.replace("api.", "")
-  : "https://keywordtoblog.dev";
+import { SITE_URL as siteUrl } from "@/lib/siteUrl";
 
 const routes = [
   "",

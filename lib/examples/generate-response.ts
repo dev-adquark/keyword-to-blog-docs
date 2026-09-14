@@ -95,11 +95,6 @@ export const generateResponseExample = {
       "# AI Content Marketing for Small Businesses: A Practical Starting Point\n\nMost small business owners don't have a marketing department...",
   },
   debug: {
-    generationModel: "keyword-to-blog-v1",
-    constraintChecks: [
-      { code: "MAX_WORDS", ok: true },
-      { code: "MIN_WORDS", ok: true },
-      { code: "MAX_SECTIONS", ok: true },
-    ],
+    generationModel: "claude-haiku-4-5-20251001",
   },
 } satisfies GenerateResponseV1;

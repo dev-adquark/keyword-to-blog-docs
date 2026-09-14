@@ -13,6 +13,7 @@ export const jobsCreateResponseExample = {
     language: "en",
     maxWords: 900,
   },
+  webhookSigningSecret: "whsec_5f2a9d3e1b4c7a8f0d6e2b1c3a9f8e7d",
 } satisfies JobV1;
 
 export const jobGetSucceededResponseExample = {

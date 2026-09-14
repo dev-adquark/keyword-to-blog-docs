@@ -3,10 +3,10 @@ import { ErrorCode } from "./Error";
 
 export interface JobsCreateRequestV1 {
   generateRequest: GenerateRequestV1;
-  webhook: {
+  /** Optional — omit to poll GET /v1/jobs/{jobId} instead of receiving a webhook callback. */
+  webhook?: {
     url: string;
     events: Array<"job.succeeded" | "job.failed">;
-    signingSecretPresent?: boolean;
   };
   format: {
     responseTypes: Array<"json" | "markdown" | "html">;
@@ -35,4 +35,6 @@ export interface JobV1 {
     message: string;
     details?: Record<string, unknown>;
   };
+  /** Present only in the POST /v1/jobs creation response, only when a webhook was configured — shown once, never retrievable again. */
+  webhookSigningSecret?: string;
 }

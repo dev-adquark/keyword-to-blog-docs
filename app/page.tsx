@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Button } from "@/components/ui/Button";
 import { Card, CardBody } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
+import { SITE_URL } from "@/lib/siteUrl";
 
 export const metadata: Metadata = {
   title: "Keyword-to-Blog API — deterministic SEO blog generation",
@@ -50,7 +51,7 @@ export default function HomePage() {
     "@context": "https://schema.org",
     "@type": "Organization",
     name: "Keyword-to-Blog API",
-    url: "https://keywordtoblog.dev",
+    url: SITE_URL,
     description:
       "An API-first service that converts keywords and topics into SEO-formatted, schema-consistent long-form blog posts.",
   };

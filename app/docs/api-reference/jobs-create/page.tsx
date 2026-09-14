@@ -45,8 +45,10 @@ export default function JobsCreateEndpointPage() {
               <h3 className="mb-2 font-display text-sm font-medium text-ink">Required fields</h3>
               <ul className="list-disc space-y-1.5 pl-5 font-body text-[14px] text-muted">
                 <li><code className="font-mono">generateRequest</code> — the same body shape as POST /v1/generate.</li>
-                <li><code className="font-mono">webhook.url</code> — where job.succeeded / job.failed will be delivered.</li>
-                <li><code className="font-mono">webhook.events</code> — which of those two events to subscribe to.</li>
+              </ul>
+              <h3 className="mb-2 mt-4 font-display text-sm font-medium text-ink">Optional fields</h3>
+              <ul className="list-disc space-y-1.5 pl-5 font-body text-[14px] text-muted">
+                <li><code className="font-mono">webhook.url</code> / <code className="font-mono">webhook.events</code> — omit to poll GET /v1/jobs/{"{jobId}"} instead. When provided, both are required together.</li>
               </ul>
             </div>
 

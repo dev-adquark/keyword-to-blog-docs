@@ -36,6 +36,7 @@ vi.mock("@/lib/server/repository", () => ({
   findApiKeyByHash: vi.fn(),
   findCustomerById: vi.fn(),
   touchApiKeyLastUsed: vi.fn(async () => undefined),
+  getUsageSince: vi.fn(async () => ({ requests: 0, words: 0 })),
 }));
 
 const { checkAndConsumeRateLimit } = await import("@/lib/server/rateLimit");

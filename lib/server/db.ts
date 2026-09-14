@@ -14,7 +14,7 @@ function getPool(): Pool {
       connectionString,
       ssl: connectionString.includes("sslmode=disable")
         ? false
-        : { rejectUnauthorized: false },
+        : { rejectUnauthorized: true },
       max: 5,
       idleTimeoutMillis: 10_000,
     });

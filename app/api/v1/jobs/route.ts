@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { authenticate } from "@/lib/server/withApiAuth";
 import { jobsCreateRequestSchema } from "@/lib/server/validation";
 import { ApiError, errorResponse, internalErrorResponse } from "@/lib/server/apiErrors";
-import { createJobRow, getJobById } from "@/lib/server/repository";
+import { createJobRow, getJobById, markJobFailed } from "@/lib/server/repository";
 import { generateWebhookSecret } from "@/lib/server/webhooks";
 import { publishJobProcessingMessage, qstashConfigured } from "@/lib/server/qstash";
 import { processJob } from "@/lib/server/jobProcessor";
@@ -56,6 +56,19 @@ export async function POST(req: Request) {
       });
     }
     const input = parsed.data;
+
+    if (input.generateRequest.constraints.maxWords > context.plan.maxWordsPerRequest) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        `constraints.maxWords exceeds the plan limit of ${context.plan.maxWordsPerRequest} words per request.`,
+        {
+          field: "generateRequest.constraints.maxWords",
+          maxAllowed: context.plan.maxWordsPerRequest,
+          received: input.generateRequest.constraints.maxWords,
+        }
+      );
+    }
+
     const webhookSecret = input.webhook ? generateWebhookSecret() : undefined;
 
     const job = await createJobRow({
@@ -70,7 +83,28 @@ export async function POST(req: Request) {
     });
 
     if (qstashConfigured()) {
-      await publishJobProcessingMessage(job.id);
+      try {
+        await publishJobProcessingMessage(job.id);
+      } catch (err) {
+        // The job row already exists — never leave it silently stuck in
+        // "queued" with no way for the caller to know processing was never
+        // enqueued. Mark it failed so GET /v1/jobs/:jobId reports a terminal
+        // state instead of polling forever.
+        await markJobFailed(
+          job.id,
+          "INTERNAL_ERROR",
+          "Failed to enqueue the job for processing. Please try again."
+        );
+        // eslint-disable-next-line no-console
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "job_enqueue_failed",
+            jobId: job.id,
+            error: err instanceof Error ? err.message : String(err),
+          })
+        );
+      }
     } else {
       // No durable queue configured: process now, synchronously, rather than
       // claiming a background worker exists when it doesn't.

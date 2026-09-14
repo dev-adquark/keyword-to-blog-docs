@@ -14,6 +14,12 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   INTERNAL_ERROR: 500,
 };
 
+/** The real HTTP status an error will be answered with — use this instead of
+ * guessing, e.g. when recording a status code for usage/analytics purposes. */
+export function statusForError(err: unknown): number {
+  return err instanceof ApiError ? STATUS_BY_CODE[err.code] : 500;
+}
+
 export class ApiError extends Error {
   code: ErrorCode;
   details?: Record<string, unknown>;

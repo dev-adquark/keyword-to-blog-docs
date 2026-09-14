@@ -18,16 +18,27 @@ export const metadata: Metadata = {
 
 const verifyExample = `const crypto = require("crypto");
 
-function verifySignature(rawBody, signatureHeader, timestampHeader, webhookSecret) {
-  const signedPayload = \`\${timestampHeader}.\${rawBody}\`;
+// The header looks like: x-ktb-signature: t=1699999999,v1=<hex hmac>
+function verifySignature(rawBody, signatureHeader, webhookSecret) {
+  const match = /^t=(\\d+),v1=([a-f0-9]+)$/i.exec(signatureHeader.trim());
+  if (!match) return false;
+  const [, timestamp, provided] = match;
+
+  // Reject stale signatures — protects against replayed deliveries.
+  const ageSeconds = Math.abs(Math.floor(Date.now() / 1000) - Number(timestamp));
+  if (ageSeconds > 5 * 60) return false;
+
+  const signedPayload = \`\${timestamp}.\${rawBody}\`;
   const expected = crypto
     .createHmac("sha256", webhookSecret)
     .update(signedPayload)
     .digest("hex");
 
-  return crypto.timingSafeEqual(
-    Buffer.from(expected),
-    Buffer.from(signatureHeader)
+  const expectedBuf = Buffer.from(expected, "hex");
+  const providedBuf = Buffer.from(provided, "hex");
+  return (
+    expectedBuf.length === providedBuf.length &&
+    crypto.timingSafeEqual(expectedBuf, providedBuf)
   );
 }`;
 
@@ -55,15 +66,15 @@ export default function WebhooksPage() {
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Headers</h2>
         <ul className="mt-3 space-y-1.5 font-mono text-[13px] text-ink">
-          <li><span className="font-medium">X-KeywordToBlog-Signature</span> <span className="text-muted font-body">— HMAC-SHA256 hex digest</span></li>
-          <li><span className="font-medium">X-KeywordToBlog-Timestamp</span> <span className="text-muted font-body">— Unix timestamp, used in the signed payload to prevent replay</span></li>
+          <li><span className="font-medium">x-ktb-signature</span> <span className="text-muted font-body">— {"`t=<unix timestamp>,v1=<HMAC-SHA256 hex digest>`"}, both in one header</span></li>
         </ul>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Verifying a signature</h2>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
-          Concatenate the timestamp header, a period, and the raw request body, then compute an
-          HMAC-SHA256 digest using your webhook&rsquo;s signing secret and compare it to the signature
-          header using a constant-time comparison.
+          Parse the timestamp and digest out of the <code className="font-mono">x-ktb-signature</code> header,
+          reject it if the timestamp is more than 5 minutes old, then concatenate the timestamp, a period, and
+          the raw request body, compute an HMAC-SHA256 digest using your webhook&rsquo;s signing secret, and
+          compare it to the provided digest using a constant-time comparison.
         </p>
         <div className="mt-4">
           <CodeBlock filename="verify.js" code={verifyExample} />

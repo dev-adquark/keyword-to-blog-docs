@@ -6,7 +6,6 @@ export const jobsCreateRequestExample = {
   webhook: {
     url: "https://example.com/webhooks/keyword-to-blog",
     events: ["job.succeeded", "job.failed"],
-    signingSecretPresent: true,
   },
   format: {
     responseTypes: ["json", "markdown"],

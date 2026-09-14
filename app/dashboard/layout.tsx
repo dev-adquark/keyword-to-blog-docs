@@ -10,9 +10,9 @@ const NAV = [
 
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div className="mx-auto flex max-w-6xl gap-8 px-6 py-10">
-      <aside className="w-48 shrink-0">
-        <nav className="flex flex-col gap-1">
+    <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 py-10 md:grid-cols-[192px_1fr]">
+      <aside className="md:w-48 md:shrink-0">
+        <nav className="flex flex-row flex-wrap gap-1 md:flex-col">
           {NAV.map((item) => (
             <Link
               key={item.href}
@@ -33,7 +33,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           <LogoutButton />
         </div>
       </aside>
-      <div className="min-w-0 flex-1">{children}</div>
+      <div className="min-w-0">{children}</div>
     </div>
   );
 }

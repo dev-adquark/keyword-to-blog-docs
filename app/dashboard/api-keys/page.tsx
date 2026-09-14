@@ -27,6 +27,7 @@ export default function ApiKeysPage() {
   const [newRawKey, setNewRawKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [revokingId, setRevokingId] = useState<string | null>(null);
+  const [revokeError, setRevokeError] = useState<string | null>(null);
 
   function load() {
     setState("loading");
@@ -71,9 +72,16 @@ export default function ApiKeysPage() {
 
   async function onRevoke(id: string) {
     setRevokingId(id);
+    setRevokeError(null);
     try {
       const res = await fetch(`/api/dashboard/api-keys/${id}/revoke`, { method: "POST" });
-      if (res.ok) load();
+      if (res.ok) {
+        load();
+      } else {
+        setRevokeError("Couldn't revoke the key. Please try again.");
+      }
+    } catch {
+      setRevokeError("Network error. Please try again.");
     } finally {
       setRevokingId(null);
     }
@@ -98,6 +106,12 @@ export default function ApiKeysPage() {
           Keep your API key secret. It will only be shown once, right after creation.
         </p>
       </div>
+
+      {revokeError && (
+        <Alert tone="danger" title="Revoke failed">
+          {revokeError}
+        </Alert>
+      )}
 
       {newRawKey && (
         <Card className="border-indigo-soft">

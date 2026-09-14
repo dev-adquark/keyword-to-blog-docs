@@ -5,6 +5,7 @@ import {
   findApiKeyByHash,
   findCustomerById,
   touchApiKeyLastUsed,
+  getUsageSince,
   type ApiKeyRow,
   type CustomerRow,
 } from "./repository";
@@ -12,6 +13,13 @@ import { getPlan, type PlanConfig } from "@/lib/plans";
 import { ApiError, errorResponse, internalErrorResponse } from "./apiErrors";
 import { checkAndConsumeRateLimit } from "./rateLimit";
 import { resolveRequestId } from "./requestId";
+
+function currentMonthBounds(): { start: Date; end: Date } {
+  const now = new Date();
+  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+  return { start, end };
+}
 
 export interface ApiAuthContext {
   apiKey: ApiKeyRow;
@@ -66,6 +74,22 @@ export async function authenticate(
 
     let rateLimitHeaders: Record<string, string> = {};
     if (opts.consumeRateLimit) {
+      const { start: periodStart, end: periodEnd } = currentMonthBounds();
+      const monthly = await getUsageSince(customer.id, periodStart);
+      if (monthly.words >= plan.monthlyWords || monthly.requests >= plan.monthlyRequests) {
+        throw new ApiError(
+          "QUOTA_EXCEEDED",
+          `Monthly word quota exceeded for plan '${plan.id}'. Upgrade your plan or wait for the next billing period.`,
+          {
+            monthlyWords: plan.monthlyWords,
+            consumedWords: monthly.words,
+            monthlyRequests: plan.monthlyRequests,
+            consumedRequests: monthly.requests,
+            periodEnd: periodEnd.toISOString(),
+          }
+        );
+      }
+
       const rl = await checkAndConsumeRateLimit(apiKey.id, plan);
       const activeWindow = rl.allowed
         ? rl.day

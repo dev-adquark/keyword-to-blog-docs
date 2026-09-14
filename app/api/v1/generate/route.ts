@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticate } from "@/lib/server/withApiAuth";
 import { generateRequestSchema } from "@/lib/server/validation";
-import { ApiError, errorResponse, internalErrorResponse } from "@/lib/server/apiErrors";
+import { ApiError, errorResponse, internalErrorResponse, statusForError } from "@/lib/server/apiErrors";
 import { getAIProvider } from "@/lib/server/generation/anthropic";
 import {
   recordUsageEvent,
@@ -9,6 +9,7 @@ import {
   updateIdempotencyRecord,
 } from "@/lib/server/repository";
 import type { GenerateResponseV1 } from "@/lib/types";
+import { env } from "@/lib/server/env";
 import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
@@ -55,6 +56,18 @@ export async function POST(req: Request) {
       });
     }
     generateRequest = parsed.data;
+
+    if (generateRequest.constraints.maxWords > context.plan.maxWordsPerRequest) {
+      throw new ApiError(
+        "VALIDATION_ERROR",
+        `constraints.maxWords exceeds the plan limit of ${context.plan.maxWordsPerRequest} words per request.`,
+        {
+          field: "constraints.maxWords",
+          maxAllowed: context.plan.maxWordsPerRequest,
+          received: generateRequest.constraints.maxWords,
+        }
+      );
+    }
 
     // Idempotency: claim the key atomically before generation so concurrent identical
     // requests cannot both bill/trigger AI generation. Replays return the same stored response.
@@ -106,7 +119,7 @@ export async function POST(req: Request) {
           : {}),
         ...(generateRequest.format.responseTypes.includes("json") ? { rawJson: post } : {}),
       },
-      debug: { generationModel: process.env.AI_MODEL || "claude-sonnet-5" },
+      debug: { generationModel: env.AI_MODEL },
     };
 
     await recordUsageEvent({
@@ -141,7 +154,7 @@ export async function POST(req: Request) {
       customerId: customer.id,
       endpoint: "/v1/generate",
       requestId,
-      statusCode: err instanceof ApiError ? 400 : 500,
+      statusCode: statusForError(err),
       success: false,
       words: 0,
       durationMs: Date.now() - started,
@@ -159,7 +172,7 @@ export async function POST(req: Request) {
           error: err instanceof ApiError ? err.code : "INTERNAL_ERROR",
           message: err instanceof Error ? err.message : "Generation failed.",
         },
-        statusCode: err instanceof ApiError ? 400 : 500,
+        statusCode: statusForError(err),
       }).catch(() => {});
     }
 

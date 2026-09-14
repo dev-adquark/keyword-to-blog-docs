@@ -4,6 +4,7 @@ import "./globals.css";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Analytics } from "@/components/Analytics";
+import { SITE_URL as siteUrl } from "@/lib/siteUrl";
 
 const spaceGrotesk = Space_Grotesk({
   subsets: ["latin"],
@@ -23,10 +24,6 @@ const plexMono = IBM_Plex_Mono({
   variable: "--font-plex-mono",
   display: "swap",
 });
-
-const siteUrl = process.env.NEXT_PUBLIC_API_BASE_URL
-  ? process.env.NEXT_PUBLIC_API_BASE_URL.replace("api.", "")
-  : "https://keywordtoblog.dev";
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),

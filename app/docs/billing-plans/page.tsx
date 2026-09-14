@@ -80,7 +80,7 @@ export default function BillingPlansPage() {
           <code className="font-mono">limits.monthlyWords</code>, further generation requests return:
         </p>
         <div className="mt-3">
-          <JsonBlock data={errorQuotaExceededExample} filename="429/402 depending on plan config" />
+          <JsonBlock data={errorQuotaExceededExample} filename="429" />
         </div>
       </div>
     </DocsPageShell>

@@ -58,6 +58,5 @@ export interface GenerateResponseV1 {
   };
   debug?: {
     generationModel?: string;
-    constraintChecks?: Array<{ code: string; ok: boolean }>;
   };
 }
