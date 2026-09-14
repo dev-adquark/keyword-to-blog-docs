@@ -5,8 +5,8 @@ import { ApiError, errorResponse, internalErrorResponse } from "@/lib/server/api
 import { getAIProvider } from "@/lib/server/generation/anthropic";
 import {
   recordUsageEvent,
-  findIdempotencyRecord,
-  saveIdempotencyRecord,
+  claimIdempotencyRequest,
+  updateIdempotencyRecord,
 } from "@/lib/server/repository";
 import type { GenerateResponseV1 } from "@/lib/types";
 import { createHash } from "node:crypto";
@@ -37,6 +37,10 @@ export async function POST(req: Request) {
   const { context, rateLimitHeaders } = auth;
   const { requestId, apiKey, customer } = context;
   const started = Date.now();
+  let generateRequest: Awaited<ReturnType<typeof generateRequestSchema.safeParse>>["data"] | null = null;
+  let idempotencyKey: string | null = null;
+  let requestHash = "";
+  let claimedIdempotency = false;
 
   try {
     const body = await req.json().catch(() => null);
@@ -50,26 +54,35 @@ export async function POST(req: Request) {
         issues: parsed.error.issues.map((i) => ({ path: i.path, message: i.message })),
       });
     }
-    const generateRequest = parsed.data;
+    generateRequest = parsed.data;
 
-    // Idempotency: same key + same request body -> return the prior response, no double generation.
-    const idempotencyKey =
-      req.headers.get("idempotency-key") || generateRequest.idempotencyKey;
-    const requestHash = createHash("sha256")
+    // Idempotency: claim the key atomically before generation so concurrent identical
+    // requests cannot both bill/trigger AI generation. Replays return the same stored response.
+    const explicitIdempotencyKey = req.headers.get("idempotency-key");
+    idempotencyKey = explicitIdempotencyKey ?? generateRequest.idempotencyKey ?? null;
+    requestHash = createHash("sha256")
       .update(JSON.stringify(generateRequest))
       .digest("hex");
 
     if (idempotencyKey) {
-      const existing = await findIdempotencyRecord(apiKey.id, idempotencyKey);
-      if (existing) {
-        if (existing.request_hash !== requestHash) {
+      const claim = await claimIdempotencyRequest({
+        apiKeyId: apiKey.id,
+        idempotencyKey,
+        requestHash,
+        response: { status: "processing" },
+        statusCode: 202,
+      });
+      claimedIdempotency = claim.claimed;
+
+      if (!claim.claimed && claim.existing) {
+        if (claim.existing.request_hash !== requestHash) {
           throw new ApiError(
             "VALIDATION_ERROR",
             "Idempotency-Key was already used with a different request body."
           );
         }
-        const res = NextResponse.json(existing.response, {
-          status: existing.status_code,
+        const res = NextResponse.json(claim.existing.response, {
+          status: claim.existing.status_code,
         });
         res.headers.set("X-Request-ID", requestId);
         for (const [k, v] of Object.entries(rateLimitHeaders)) res.headers.set(k, v);
@@ -109,7 +122,7 @@ export async function POST(req: Request) {
     });
 
     if (idempotencyKey) {
-      await saveIdempotencyRecord({
+      await updateIdempotencyRecord({
         apiKeyId: apiKey.id,
         idempotencyKey,
         requestHash,
@@ -134,6 +147,21 @@ export async function POST(req: Request) {
       durationMs: Date.now() - started,
       countedTowardQuota: false,
     }).catch(() => {});
+
+    if (idempotencyKey && claimedIdempotency && generateRequest) {
+      await updateIdempotencyRecord({
+        apiKeyId: apiKey.id,
+        idempotencyKey,
+        requestHash: createHash("sha256")
+          .update(JSON.stringify(generateRequest))
+          .digest("hex"),
+        response: {
+          error: err instanceof ApiError ? err.code : "INTERNAL_ERROR",
+          message: err instanceof Error ? err.message : "Generation failed.",
+        },
+        statusCode: err instanceof ApiError ? 400 : 500,
+      }).catch(() => {});
+    }
 
     if (err instanceof ApiError) return errorResponse(err, requestId);
     return internalErrorResponse(requestId, err);

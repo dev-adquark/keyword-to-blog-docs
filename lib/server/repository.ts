@@ -325,17 +325,22 @@ export async function findIdempotencyRecord(
   );
 }
 
-export async function saveIdempotencyRecord(params: {
+export async function claimIdempotencyRequest(params: {
   apiKeyId: string;
   idempotencyKey: string;
   requestHash: string;
   response: unknown;
   statusCode: number;
-}): Promise<void> {
-  await query(
+}): Promise<{ claimed: boolean; existing: { request_hash: string; response: unknown; status_code: number } | null }> {
+  const row = await queryOne<{
+    request_hash: string;
+    response: unknown;
+    status_code: number;
+  }>(
     `INSERT INTO idempotency_records (api_key_id, idempotency_key, request_hash, response, status_code)
      VALUES ($1,$2,$3,$4,$5)
-     ON CONFLICT (api_key_id, idempotency_key) DO NOTHING`,
+     ON CONFLICT (api_key_id, idempotency_key) DO NOTHING
+     RETURNING request_hash, response, status_code`,
     [
       params.apiKeyId,
       params.idempotencyKey,
@@ -344,4 +349,45 @@ export async function saveIdempotencyRecord(params: {
       params.statusCode,
     ]
   );
+
+  if (row) {
+    return { claimed: true, existing: row };
+  }
+
+  const existing = await findIdempotencyRecord(params.apiKeyId, params.idempotencyKey);
+  return { claimed: false, existing };
+}
+
+export async function updateIdempotencyRecord(params: {
+  apiKeyId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  response: unknown;
+  statusCode: number;
+}): Promise<void> {
+  await query(
+    `UPDATE idempotency_records
+     SET request_hash = $3,
+         response = $4,
+         status_code = $5,
+         created_at = created_at
+     WHERE api_key_id = $1 AND idempotency_key = $2`,
+    [
+      params.apiKeyId,
+      params.idempotencyKey,
+      params.requestHash,
+      JSON.stringify(params.response),
+      params.statusCode,
+    ]
+  );
+}
+
+export async function saveIdempotencyRecord(params: {
+  apiKeyId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  response: unknown;
+  statusCode: number;
+}): Promise<void> {
+  await updateIdempotencyRecord(params);
 }
