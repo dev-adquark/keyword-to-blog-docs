@@ -7,12 +7,33 @@ import { env } from "@/lib/server/env";
 
 export const runtime = "nodejs";
 
+function getSignupAuthSecret(): string {
+  try {
+    return env.AUTH_SECRET;
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.error("signup_debug", {
+      step: "auth_secret_missing",
+      message: err instanceof Error ? err.message : String(err),
+    });
+    throw new Error("AUTH_SECRET_NOT_CONFIGURED");
+  }
+}
+
 export async function POST(req: Request) {
   let parsed;
   try {
     const body = await req.json();
     parsed = signupSchema.safeParse(body);
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", {
+      step: "request_validation",
+      valid: parsed.success,
+      inputKeys: body && typeof body === "object" ? Object.keys(body) : [],
+    });
   } catch {
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "request_validation_failed" });
     return NextResponse.json(
       {
         code: "VALIDATION_ERROR",
@@ -23,6 +44,11 @@ export async function POST(req: Request) {
   }
 
   if (!parsed || !parsed.success) {
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", {
+      step: "request_validation_failed",
+      issues: parsed?.error.issues.map((issue) => ({ path: issue.path, message: issue.message })) ?? [],
+    });
     return NextResponse.json(
       {
         code: "VALIDATION_ERROR",
@@ -36,6 +62,8 @@ export async function POST(req: Request) {
   const { name, email, password } = parsed.data;
 
   if (!passwordMeetsPolicy(password)) {
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "password_policy_failed", emailLength: email.length });
     return NextResponse.json(
       { code: "VALIDATION_ERROR", message: "Password must be at least 10 characters long." },
       { status: 400 }
@@ -43,18 +71,38 @@ export async function POST(req: Request) {
   }
 
   try {
+    const authSecret = getSignupAuthSecret();
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "auth_secret_ready" });
+
     const existing = await findUserByEmail(email);
     if (existing) {
+      // eslint-disable-next-line no-console
+      console.info("signup_debug", { step: "existing_user_found" });
       return NextResponse.json(
         { code: "VALIDATION_ERROR", message: "An account with this email already exists." },
         { status: 409 }
       );
     }
 
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "password_hash_start" });
     const passwordHash = await hashPassword(password);
-    const { user } = await createUserAndCustomer({ name, email, passwordHash });
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "password_hash_complete" });
 
-    const token = await signSession({ userId: user.id }, env.AUTH_SECRET);
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "user_customer_insert_start" });
+    const { user } = await createUserAndCustomer({ name, email, passwordHash });
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "user_customer_insert_complete", userId: user.id });
+
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "session_sign_start", userId: user.id });
+    const token = await signSession({ userId: user.id }, authSecret);
+    // eslint-disable-next-line no-console
+    console.info("signup_debug", { step: "session_sign_complete", userId: user.id });
+
     const res = NextResponse.json({ ok: true }, { status: 201 });
     res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions);
     return res;
@@ -66,7 +114,8 @@ export async function POST(req: Request) {
 
     // eslint-disable-next-line no-console
     console.error("signup_error", {
-      message: err instanceof Error ? err.message : String(err),
+      step: "signup_failed",
+      error: err instanceof Error ? err.message : String(err),
     });
 
     return NextResponse.json(

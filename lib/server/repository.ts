@@ -1,5 +1,5 @@
 import "server-only";
-import { query, queryOne } from "./db";
+import { query, queryOne, withClient } from "./db";
 import {
   newUserId,
   newCustomerId,
@@ -72,16 +72,48 @@ export async function createUserAndCustomer(params: {
 }): Promise<{ user: UserRow; customer: CustomerRow }> {
   const userId = newUserId();
   const customerId = newCustomerId();
-  const user = await queryOne<UserRow>(
-    `INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [userId, params.email.toLowerCase(), params.passwordHash, params.name]
-  );
-  const customer = await queryOne<CustomerRow>(
-    `INSERT INTO customers (id, user_id, plan) VALUES ($1, $2, $3) RETURNING *`,
-    [customerId, userId, DEFAULT_PLAN_ID]
-  );
-  if (!user || !customer) throw new Error("Failed to create account");
-  return { user, customer };
+
+  return withClient(async (client) => {
+    await client.query("BEGIN");
+    try {
+      // eslint-disable-next-line no-console
+      console.info("signup_db_debug", { step: "user_insert_start" });
+      const user = await client.query<UserRow>(
+        `INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [userId, params.email.toLowerCase(), params.passwordHash, params.name]
+      );
+      // eslint-disable-next-line no-console
+      console.info("signup_db_debug", { step: "user_insert_done", userId: user.rows[0]?.id });
+
+      // eslint-disable-next-line no-console
+      console.info("signup_db_debug", { step: "customer_insert_start", userId });
+      const customer = await client.query<CustomerRow>(
+        `INSERT INTO customers (id, user_id, plan) VALUES ($1, $2, $3) RETURNING *`,
+        [customerId, userId, DEFAULT_PLAN_ID]
+      );
+      // eslint-disable-next-line no-console
+      console.info("signup_db_debug", { step: "customer_insert_done", customerId: customer.rows[0]?.id });
+
+      await client.query("COMMIT");
+      // eslint-disable-next-line no-console
+      console.info("signup_db_debug", { step: "transaction_commit" });
+
+      const createdUser = user.rows[0];
+      const createdCustomer = customer.rows[0];
+      if (!createdUser || !createdCustomer) {
+        throw new Error("Failed to create account");
+      }
+      return { user: createdUser, customer: createdCustomer };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      // eslint-disable-next-line no-console
+      console.error("signup_db_debug", {
+        step: "transaction_rollback",
+        error: err instanceof Error ? err.message : String(err),
+      });
+      throw err;
+    }
+  });
 }
 
 export async function findUserByEmail(email: string): Promise<UserRow | null> {
