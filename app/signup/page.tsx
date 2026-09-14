@@ -25,12 +25,20 @@ export default function SignupPage() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ name, email, password }),
       });
-      const data = await res.json();
+
+      let data: { message?: string } | null = null;
+      try {
+        data = await res.json();
+      } catch {
+        data = null;
+      }
+
       if (!res.ok) {
         setStatus("error");
-        setError(data.message || "Something went wrong. Please try again.");
+        setError(data?.message || "Something went wrong. Please try again.");
         return;
       }
+
       router.push("/dashboard");
       router.refresh();
     } catch {
