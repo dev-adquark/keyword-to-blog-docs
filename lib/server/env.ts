@@ -55,6 +55,17 @@ export const env = {
   get NODE_ENV() {
     return process.env.NODE_ENV || "development";
   },
+  /** Optional — owner-notification emails are a no-op until both are set. */
+  get RESEND_API_KEY() {
+    return process.env.RESEND_API_KEY || "";
+  },
+  get OWNER_NOTIFICATION_EMAIL() {
+    return process.env.OWNER_NOTIFICATION_EMAIL || "";
+  },
+  /** Resend's shared sender for accounts without a verified sending domain yet. */
+  get RESEND_FROM_EMAIL() {
+    return optional("RESEND_FROM_EMAIL", "onboarding@resend.dev");
+  },
 };
 
 /** Whether durable async job delivery (QStash) is configured. */
@@ -64,4 +75,9 @@ export function qstashConfigured(): boolean {
       process.env.QSTASH_CURRENT_SIGNING_KEY &&
       process.env.QSTASH_NEXT_SIGNING_KEY
   );
+}
+
+/** Whether owner-notification email delivery is configured. */
+export function notificationsConfigured(): boolean {
+  return Boolean(process.env.RESEND_API_KEY && process.env.OWNER_NOTIFICATION_EMAIL);
 }

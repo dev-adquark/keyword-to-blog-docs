@@ -63,7 +63,6 @@ export function internalErrorResponse(
   requestId: string,
   loggedError: unknown
 ): NextResponse<ErrorResponseV1> {
-  // eslint-disable-next-line no-console
   console.error(
     JSON.stringify({
       requestId,

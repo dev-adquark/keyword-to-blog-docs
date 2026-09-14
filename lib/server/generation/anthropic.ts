@@ -136,7 +136,6 @@ export class AnthropicProvider implements AIProvider {
       }
     }
 
-    // eslint-disable-next-line no-console
     console.error(
       JSON.stringify({
         level: "error",

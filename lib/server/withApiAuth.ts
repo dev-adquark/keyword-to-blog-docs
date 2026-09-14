@@ -4,6 +4,7 @@ import { extractApiKeyFromHeaders, hashApiKey } from "./apiKey";
 import {
   findApiKeyByHash,
   findCustomerById,
+  findUserById,
   touchApiKeyLastUsed,
   getUsageSince,
   type ApiKeyRow,
@@ -13,6 +14,47 @@ import { getPlan, type PlanConfig } from "@/lib/plans";
 import { ApiError, errorResponse, internalErrorResponse } from "./apiErrors";
 import { checkAndConsumeRateLimit } from "./rateLimit";
 import { resolveRequestId } from "./requestId";
+import { notifyOwner, recordRepeatedViolation, safeAfter } from "./notifications";
+
+/** Best-effort owner alert for repeated abuse on one endpoint — never blocks the request. */
+function alertOnRepeatedViolation(params: {
+  kind: "rate_limit" | "quota";
+  customer: CustomerRow;
+  endpoint: string;
+}): void {
+  safeAfter(async () => {
+    const { shouldNotify, approxCount, windowMinutes } = await recordRepeatedViolation({
+      kind: params.kind,
+      key: `${params.customer.id}:${params.endpoint}`,
+    });
+    if (!shouldNotify) return;
+
+    const user = await findUserById(params.customer.user_id);
+    if (!user) return;
+
+    await notifyOwner(
+      params.kind === "rate_limit"
+        ? {
+            type: "REPEATED_RATE_LIMIT",
+            userId: user.id,
+            email: user.email,
+            plan: params.customer.plan,
+            endpoint: params.endpoint,
+            approxCount,
+            windowMinutes,
+          }
+        : {
+            type: "REPEATED_QUOTA_EXCEEDED",
+            userId: user.id,
+            email: user.email,
+            plan: params.customer.plan,
+            endpoint: params.endpoint,
+            approxCount,
+            windowMinutes,
+          }
+    );
+  });
+}
 
 function currentMonthBounds(): { start: Date; end: Date } {
   const now = new Date();
@@ -72,11 +114,14 @@ export async function authenticate(
     // Fire-and-forget — last-used tracking should never fail the request.
     touchApiKeyLastUsed(apiKey.id).catch(() => {});
 
+    const endpoint = new URL(req.url).pathname;
+
     let rateLimitHeaders: Record<string, string> = {};
     if (opts.consumeRateLimit) {
       const { start: periodStart, end: periodEnd } = currentMonthBounds();
       const monthly = await getUsageSince(customer.id, periodStart);
       if (monthly.words >= plan.monthlyWords || monthly.requests >= plan.monthlyRequests) {
+        alertOnRepeatedViolation({ kind: "quota", customer, endpoint });
         throw new ApiError(
           "QUOTA_EXCEEDED",
           `Monthly word quota exceeded for plan '${plan.id}'. Upgrade your plan or wait for the next billing period.`,
@@ -104,6 +149,7 @@ export async function authenticate(
       };
 
       if (!rl.allowed) {
+        alertOnRepeatedViolation({ kind: "rate_limit", customer, endpoint });
         const retryAfter = Math.max(
           1,
           activeWindow.resetAt - Math.floor(Date.now() / 1000)

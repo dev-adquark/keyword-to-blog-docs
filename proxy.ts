@@ -5,7 +5,7 @@ export const config = {
   matcher: ["/dashboard/:path*"],
 };
 
-export async function middleware(req: NextRequest) {
+export async function proxy(req: NextRequest) {
   const token = req.cookies.get(SESSION_COOKIE)?.value;
   const authSecret = process.env.AUTH_SECRET;
 

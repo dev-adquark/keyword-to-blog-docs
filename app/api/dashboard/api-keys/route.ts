@@ -4,6 +4,7 @@ import { createApiKeySchema } from "@/lib/server/validation";
 import { generateApiKey } from "@/lib/server/apiKey";
 import { insertApiKey, listApiKeysForCustomer } from "@/lib/server/repository";
 import { getPlan } from "@/lib/plans";
+import { notifyOwner, safeAfter } from "@/lib/server/notifications";
 
 export const runtime = "nodejs";
 
@@ -42,7 +43,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const { customer } = await requireSession();
+    const { user, customer } = await requireSession();
     const body = await req.json().catch(() => null);
     const parsed = body ? createApiKeySchema.safeParse(body) : null;
     if (!parsed || !parsed.success) {
@@ -64,6 +65,20 @@ export async function POST(req: Request) {
       environment: generated.environment,
       scopes,
     });
+
+    safeAfter(() =>
+      notifyOwner({
+        type: "API_KEY_CREATED",
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+        plan: customer.plan,
+        apiKeyId: row.id,
+        keyPrefix: row.key_prefix,
+        environment: row.environment,
+        createdAt: row.created_at,
+      })
+    );
 
     // The raw secret is returned exactly once, here, and is never persisted or retrievable again.
     return NextResponse.json(

@@ -95,7 +95,6 @@ export async function POST(req: Request) {
           "INTERNAL_ERROR",
           "Failed to enqueue the job for processing. Please try again."
         );
-        // eslint-disable-next-line no-console
         console.error(
           JSON.stringify({
             level: "error",

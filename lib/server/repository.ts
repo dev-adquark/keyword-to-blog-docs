@@ -76,26 +76,21 @@ export async function createUserAndCustomer(params: {
   return withClient(async (client) => {
     await client.query("BEGIN");
     try {
-      // eslint-disable-next-line no-console
       console.info("signup_db_debug", { step: "user_insert_start" });
       const user = await client.query<UserRow>(
         `INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4) RETURNING *`,
         [userId, params.email.toLowerCase(), params.passwordHash, params.name]
       );
-      // eslint-disable-next-line no-console
       console.info("signup_db_debug", { step: "user_insert_done", userId: user.rows[0]?.id });
 
-      // eslint-disable-next-line no-console
       console.info("signup_db_debug", { step: "customer_insert_start", userId });
       const customer = await client.query<CustomerRow>(
         `INSERT INTO customers (id, user_id, plan) VALUES ($1, $2, $3) RETURNING *`,
         [customerId, userId, DEFAULT_PLAN_ID]
       );
-      // eslint-disable-next-line no-console
       console.info("signup_db_debug", { step: "customer_insert_done", customerId: customer.rows[0]?.id });
 
       await client.query("COMMIT");
-      // eslint-disable-next-line no-console
       console.info("signup_db_debug", { step: "transaction_commit" });
 
       const createdUser = user.rows[0];
@@ -106,7 +101,6 @@ export async function createUserAndCustomer(params: {
       return { user: createdUser, customer: createdCustomer };
     } catch (err) {
       await client.query("ROLLBACK");
-      // eslint-disable-next-line no-console
       console.error("signup_db_debug", {
         step: "transaction_rollback",
         error: err instanceof Error ? err.message : String(err),
@@ -330,12 +324,14 @@ export async function createAccessRequest(params: {
   customerId: string;
   requestedPlan: string;
   reason?: string;
-}): Promise<void> {
+}): Promise<{ id: string }> {
+  const id = newAccessRequestId();
   await query(
     `INSERT INTO access_requests (id, customer_id, requested_plan, reason)
      VALUES ($1, $2, $3, $4)`,
-    [newAccessRequestId(), params.customerId, params.requestedPlan, params.reason ?? null]
+    [id, params.customerId, params.requestedPlan, params.reason ?? null]
   );
+  return { id };
 }
 
 export async function listAccessRequestsForCustomer(customerId: string) {

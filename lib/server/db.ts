@@ -3,7 +3,6 @@ import { Pool, type QueryResultRow } from "pg";
 import { env } from "./env";
 
 declare global {
-  // eslint-disable-next-line no-var
   var __ktbPgPool: Pool | undefined;
 }
 

@@ -43,7 +43,20 @@ export default function ApiKeysPage() {
       .catch(() => setState("error"));
   }
 
-  useEffect(load, []);
+  useEffect(() => {
+    // State already starts as "loading" — avoid a redundant synchronous
+    // setState("loading") inside the effect, which react-hooks flags.
+    fetch("/api/dashboard/api-keys")
+      .then((res) => {
+        if (!res.ok) throw new Error();
+        return res.json();
+      })
+      .then((json) => {
+        setKeys(json.keys);
+        setState("ready");
+      })
+      .catch(() => setState("error"));
+  }, []);
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault();
