@@ -67,14 +67,23 @@ export async function authenticate(
     let rateLimitHeaders: Record<string, string> = {};
     if (opts.consumeRateLimit) {
       const rl = await checkAndConsumeRateLimit(apiKey.id, plan);
+      const activeWindow = rl.allowed
+        ? rl.day
+        : rl.blockedBy === "minute"
+          ? rl.minute
+          : rl.day;
+
       rateLimitHeaders = {
-        "X-RateLimit-Limit": String(rl.day.limit),
-        "X-RateLimit-Remaining": String(rl.day.remaining),
-        "X-RateLimit-Reset": String(rl.day.resetAt),
+        "X-RateLimit-Limit": String(activeWindow.limit),
+        "X-RateLimit-Remaining": String(activeWindow.remaining),
+        "X-RateLimit-Reset": String(activeWindow.resetAt),
       };
+
       if (!rl.allowed) {
-        const activeWindow = rl.blockedBy === "minute" ? rl.minute : rl.day;
-        const retryAfter = Math.max(1, activeWindow.resetAt - Math.floor(Date.now() / 1000));
+        const retryAfter = Math.max(
+          1,
+          activeWindow.resetAt - Math.floor(Date.now() / 1000)
+        );
         throw new ApiError(
           "RATE_LIMITED",
           rl.blockedBy === "minute"
@@ -82,7 +91,7 @@ export async function authenticate(
             : "Daily API request limit reached.",
           {
             limit: activeWindow.limit,
-            remaining: 0,
+            remaining: activeWindow.remaining,
             resetAt: new Date(activeWindow.resetAt * 1000).toISOString(),
           },
           { ...rateLimitHeaders, "Retry-After": String(retryAfter) }
