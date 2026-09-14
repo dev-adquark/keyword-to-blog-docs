@@ -33,7 +33,7 @@ export default function PrivacyPage() {
           <h2 className="font-display text-lg font-medium text-ink">How we use it</h2>
           <ul className="mt-2 list-disc space-y-1.5 pl-5 text-muted">
             <li>To generate the blog post content your request asked for.</li>
-            <li>To meter usage against your plan's word and request quotas.</li>
+            <li>To meter usage against your plan&rsquo;s word and request quotas.</li>
             <li>To deliver webhook events to the URL you configured.</li>
             <li>To investigate abuse, debug failures, and maintain service reliability.</li>
           </ul>

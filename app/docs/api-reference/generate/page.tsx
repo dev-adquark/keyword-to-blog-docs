@@ -57,12 +57,12 @@ export default function GenerateEndpointPage() {
                   </Tr>
                 </Thead>
                 <tbody>
-                  <Tr><Td className="font-mono">keywords</Td><Td className="font-mono">string[]</Td><Td>At least 1 keyword required.</Td></Tr>
-                  <Tr><Td className="font-mono">topic</Td><Td className="font-mono">string?</Td><Td>Optional framing for the post beyond the raw keywords.</Td></Tr>
-                  <Tr><Td className="font-mono">language</Td><Td className="font-mono">string</Td><Td>e.g. "en".</Td></Tr>
-                  <Tr><Td className="font-mono">tone</Td><Td className="font-mono">"professional" | "friendly" | "bold"</Td><Td>Must match one of the supported enum values.</Td></Tr>
-                  <Tr><Td className="font-mono">constraints.maxWords</Td><Td className="font-mono">number</Td><Td>Capped by your plan's maxWordsPerRequest — see billing & plans.</Td></Tr>
-                  <Tr><Td className="font-mono">format.responseTypes</Td><Td className="font-mono">Array&lt;"json"|"markdown"|"html"&gt;</Td><Td>Controls which representations appear under rendered.</Td></Tr>
+                  <Tr><Td className="font-mono">keywords</Td><Td className="font-mono">{`string[]`}</Td><Td>At least 1 keyword required.</Td></Tr>
+                  <Tr><Td className="font-mono">topic</Td><Td className="font-mono">{`string?`}</Td><Td>Optional framing for the post beyond the raw keywords.</Td></Tr>
+                  <Tr><Td className="font-mono">language</Td><Td className="font-mono">string</Td><Td>e.g. {`"en"`}.</Td></Tr>
+                  <Tr><Td className="font-mono">tone</Td><Td className="font-mono">{`"professional" | "friendly" | "bold"`}</Td><Td>Must match one of the supported enum values.</Td></Tr>
+                  <Tr><Td className="font-mono">constraints.maxWords</Td><Td className="font-mono">number</Td><Td>Capped by your plan&rsquo;s maxWordsPerRequest — see billing & plans.</Td></Tr>
+                  <Tr><Td className="font-mono">format.responseTypes</Td><Td className="font-mono">{`Array<"json"|"markdown"|"html">`}</Td><Td>Controls which representations appear under rendered.</Td></Tr>
                 </tbody>
               </Table>
               <p className="mt-2 font-body text-[13px] text-muted">

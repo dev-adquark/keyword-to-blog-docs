@@ -31,7 +31,7 @@ export default function JobsCreateEndpointPage() {
         <p className="font-mono text-xs text-indigo">API reference</p>
         <h1 className="mt-2 font-display text-3xl font-medium text-ink">POST /v1/jobs</h1>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
-          Creates an asynchronous generation job. Use this when you'd rather not hold a connection
+          Creates an asynchronous generation job. Use this when you&rsquo;d rather not hold a connection
           open, or when you want a webhook delivered on completion.
         </p>
 

@@ -23,7 +23,7 @@ export default function SeoFormattingGuidePage() {
         <h1 className="mt-2 font-display text-3xl font-medium text-ink">SEO formatting guide</h1>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
           Every generated post follows the same deterministic structure, so downstream templates
-          and CMS imports don't have to special-case the output.
+          and CMS imports don&rsquo;t have to special-case the output.
         </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Field-by-field structure</h2>
@@ -39,7 +39,7 @@ export default function SeoFormattingGuidePage() {
             <Tr><Td className="font-mono">outline.h1 / outline.h2</Td><Td>The heading hierarchy, generated before section content to keep structure consistent.</Td></Tr>
             <Tr><Td className="font-mono">sections</Td><Td>Ordered array of typed blocks: introduction, body, faq, conclusion, or callout.</Td></Tr>
             <Tr><Td className="font-mono">faqs</Td><Td>Present only when constraints.includeFAQs is true.</Td></Tr>
-            <Tr><Td className="font-mono">conclusion</Td><Td>Closing section, duplicated from the final "conclusion"-type section for convenience.</Td></Tr>
+            <Tr><Td className="font-mono">conclusion</Td><Td>Closing section, duplicated from the final &ldquo;conclusion&rdquo;-type section for convenience.</Td></Tr>
             <Tr><Td className="font-mono">coverageNotes.keywordCoverage</Td><Td>Per-keyword evidence of where and whether it was actually used.</Td></Tr>
           </tbody>
         </Table>
@@ -59,11 +59,11 @@ export default function SeoFormattingGuidePage() {
             search-intent-first regardless of tone.
           </li>
           <li>
-            <span className="text-ink">region</span> affects spelling/units (e.g. "colour" vs
-            "color") and locally relevant examples, but not the JSON structure itself.
+            <span className="text-ink">region</span> affects spelling/units (e.g. &ldquo;colour&rdquo; vs
+            &ldquo;color&rdquo;) and locally relevant examples, but not the JSON structure itself.
           </li>
           <li>
-            <span className="text-ink">language</span> affects every text field's language, but
+            <span className="text-ink">language</span> affects every text field&rsquo;s language, but
             field names and structure remain identical across all languages.
           </li>
         </ul>

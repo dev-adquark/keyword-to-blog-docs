@@ -57,7 +57,6 @@ export default function HomePage() {
 
   return (
     <main>
-      {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

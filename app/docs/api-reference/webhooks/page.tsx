@@ -62,7 +62,7 @@ export default function WebhooksPage() {
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Verifying a signature</h2>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
           Concatenate the timestamp header, a period, and the raw request body, then compute an
-          HMAC-SHA256 digest using your webhook's signing secret and compare it to the signature
+          HMAC-SHA256 digest using your webhook&rsquo;s signing secret and compare it to the signature
           header using a constant-time comparison.
         </p>
         <div className="mt-4">

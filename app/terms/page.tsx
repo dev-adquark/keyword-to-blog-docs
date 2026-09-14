@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Terms of service",
@@ -23,8 +24,8 @@ export default function TermsPage() {
           <h2 className="font-display text-lg font-medium text-ink">Use of the API</h2>
           <p className="mt-2 text-muted">
             You may use the Keyword-to-Blog API to generate blog content for your own products,
-            clients, or internal pipelines, subject to your plan's rate limits and quotas described
-            in <a href="/docs/billing-plans" className="text-indigo underline underline-offset-2">Billing & plans</a>.
+            clients, or internal pipelines, subject to your plan&rsquo;s rate limits and quotas described
+            in <Link href="/docs/billing-plans" className="text-indigo underline underline-offset-2">Billing &amp; plans</Link>.
           </p>
         </section>
 

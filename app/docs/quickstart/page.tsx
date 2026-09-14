@@ -50,8 +50,8 @@ export default function QuickstartPage() {
         </h2>
         <ol className="mt-3 list-decimal space-y-1.5 pl-5 font-body text-[15px] text-muted">
           <li>Sign in to your dashboard and open Settings &rarr; API keys.</li>
-          <li>Click "Create key", choose a scope (generate, jobs, usage), and name it.</li>
-          <li>Copy the key immediately — it's shown only once.</li>
+          <li>Click &ldquo;Create key&rdquo;, choose a scope (generate, jobs, usage), and name it.</li>
+          <li>Copy the key immediately — it&rsquo;s shown only once.</li>
         </ol>
         <div className="mt-4">
           <CodeBlock filename=".env" code={`KEYWORD_TO_BLOG_API_KEY="ktb_live_xxxxxxxxxxxxxxxxxxxxxxxx"`} />
