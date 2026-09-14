@@ -27,4 +27,11 @@ export interface UsageResponseV1 {
     posts?: number;
     requests?: number;
   };
+  /** Per-API-key daily quota — the primary Free-plan control (3 req/day). */
+  daily: {
+    limit: number;
+    used: number;
+    remaining: number;
+    resetAt: string;
+  };
 }

@@ -1,0 +1,347 @@
+import "server-only";
+import { query, queryOne } from "./db";
+import {
+  newUserId,
+  newCustomerId,
+  newApiKeyId,
+  newUsageId,
+  newJobId,
+  newAccessRequestId,
+} from "./ids";
+import { DEFAULT_PLAN_ID } from "@/lib/plans";
+import type { GenerateRequestV1, SEOPostV1 } from "@/lib/types";
+
+export interface UserRow {
+  id: string;
+  email: string;
+  password_hash: string;
+  name: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CustomerRow {
+  id: string;
+  user_id: string;
+  plan: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApiKeyRow {
+  id: string;
+  customer_id: string;
+  key_prefix: string;
+  key_hash: string;
+  name: string;
+  environment: string;
+  scopes: string[];
+  status: string;
+  created_at: string;
+  last_used_at: string | null;
+  revoked_at: string | null;
+}
+
+export interface JobRow {
+  id: string;
+  customer_id: string;
+  api_key_id: string;
+  status: string;
+  request_id: string;
+  input: GenerateRequestV1;
+  webhook_url: string | null;
+  webhook_events: string[];
+  webhook_secret: string | null;
+  result: SEOPostV1 | null;
+  rendered: { markdown?: string; html?: string } | null;
+  error_code: string | null;
+  error_message: string | null;
+  idempotency_key: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+// ---------- Users / Customers ----------
+
+export async function createUserAndCustomer(params: {
+  name: string;
+  email: string;
+  passwordHash: string;
+}): Promise<{ user: UserRow; customer: CustomerRow }> {
+  const userId = newUserId();
+  const customerId = newCustomerId();
+  const user = await queryOne<UserRow>(
+    `INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4) RETURNING *`,
+    [userId, params.email.toLowerCase(), params.passwordHash, params.name]
+  );
+  const customer = await queryOne<CustomerRow>(
+    `INSERT INTO customers (id, user_id, plan) VALUES ($1, $2, $3) RETURNING *`,
+    [customerId, userId, DEFAULT_PLAN_ID]
+  );
+  if (!user || !customer) throw new Error("Failed to create account");
+  return { user, customer };
+}
+
+export async function findUserByEmail(email: string): Promise<UserRow | null> {
+  return queryOne<UserRow>(`SELECT * FROM users WHERE email = $1`, [
+    email.toLowerCase(),
+  ]);
+}
+
+export async function findUserById(id: string): Promise<UserRow | null> {
+  return queryOne<UserRow>(`SELECT * FROM users WHERE id = $1`, [id]);
+}
+
+export async function findCustomerByUserId(
+  userId: string
+): Promise<CustomerRow | null> {
+  return queryOne<CustomerRow>(`SELECT * FROM customers WHERE user_id = $1`, [
+    userId,
+  ]);
+}
+
+export async function findCustomerById(
+  id: string
+): Promise<CustomerRow | null> {
+  return queryOne<CustomerRow>(`SELECT * FROM customers WHERE id = $1`, [id]);
+}
+
+export async function updateCustomerPlan(
+  customerId: string,
+  plan: string
+): Promise<void> {
+  await query(
+    `UPDATE customers SET plan = $2, updated_at = now() WHERE id = $1`,
+    [customerId, plan]
+  );
+}
+
+// ---------- API Keys ----------
+
+export async function insertApiKey(params: {
+  customerId: string;
+  keyPrefix: string;
+  keyHash: string;
+  name: string;
+  environment: string;
+  scopes: string[];
+}): Promise<ApiKeyRow> {
+  const id = newApiKeyId();
+  const row = await queryOne<ApiKeyRow>(
+    `INSERT INTO api_keys (id, customer_id, key_prefix, key_hash, name, environment, scopes)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
+    [
+      id,
+      params.customerId,
+      params.keyPrefix,
+      params.keyHash,
+      params.name,
+      params.environment,
+      params.scopes,
+    ]
+  );
+  if (!row) throw new Error("Failed to create API key");
+  return row;
+}
+
+export async function findApiKeyByHash(
+  keyHash: string
+): Promise<ApiKeyRow | null> {
+  return queryOne<ApiKeyRow>(`SELECT * FROM api_keys WHERE key_hash = $1`, [
+    keyHash,
+  ]);
+}
+
+export async function listApiKeysForCustomer(
+  customerId: string
+): Promise<ApiKeyRow[]> {
+  return query<ApiKeyRow>(
+    `SELECT * FROM api_keys WHERE customer_id = $1 ORDER BY created_at DESC`,
+    [customerId]
+  );
+}
+
+export async function touchApiKeyLastUsed(id: string): Promise<void> {
+  await query(`UPDATE api_keys SET last_used_at = now() WHERE id = $1`, [id]);
+}
+
+export async function revokeApiKey(
+  id: string,
+  customerId: string
+): Promise<boolean> {
+  const rows = await query(
+    `UPDATE api_keys SET status = 'revoked', revoked_at = now()
+     WHERE id = $1 AND customer_id = $2 AND status = 'active' RETURNING id`,
+    [id, customerId]
+  );
+  return rows.length > 0;
+}
+
+// ---------- Usage ----------
+
+export async function recordUsageEvent(params: {
+  apiKeyId: string;
+  customerId: string;
+  endpoint: string;
+  requestId: string;
+  statusCode: number;
+  success: boolean;
+  words: number;
+  durationMs: number;
+  countedTowardQuota: boolean;
+}): Promise<void> {
+  await query(
+    `INSERT INTO usage_events
+      (id, api_key_id, customer_id, endpoint, request_id, status_code, success, words, duration_ms, counted_toward_quota)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+    [
+      newUsageId(),
+      params.apiKeyId,
+      params.customerId,
+      params.endpoint,
+      params.requestId,
+      params.statusCode,
+      params.success,
+      params.words,
+      params.durationMs,
+      params.countedTowardQuota,
+    ]
+  );
+}
+
+export async function getUsageSince(
+  customerId: string,
+  since: Date
+): Promise<{ requests: number; words: number }> {
+  const row = await queryOne<{ requests: string; words: string }>(
+    `SELECT COUNT(*) FILTER (WHERE counted_toward_quota) AS requests,
+            COALESCE(SUM(words) FILTER (WHERE counted_toward_quota), 0) AS words
+     FROM usage_events WHERE customer_id = $1 AND created_at >= $2`,
+    [customerId, since.toISOString()]
+  );
+  return {
+    requests: Number(row?.requests ?? 0),
+    words: Number(row?.words ?? 0),
+  };
+}
+
+// ---------- Jobs ----------
+
+export async function createJobRow(params: {
+  customerId: string;
+  apiKeyId: string;
+  requestId: string;
+  input: GenerateRequestV1;
+  webhookUrl?: string;
+  webhookEvents?: string[];
+  webhookSecret?: string;
+  idempotencyKey?: string;
+}): Promise<JobRow> {
+  const id = newJobId();
+  const row = await queryOne<JobRow>(
+    `INSERT INTO jobs (id, customer_id, api_key_id, request_id, input, webhook_url, webhook_events, webhook_secret, idempotency_key)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
+    [
+      id,
+      params.customerId,
+      params.apiKeyId,
+      params.requestId,
+      JSON.stringify(params.input),
+      params.webhookUrl ?? null,
+      params.webhookEvents ?? [],
+      params.webhookSecret ?? null,
+      params.idempotencyKey ?? null,
+    ]
+  );
+  if (!row) throw new Error("Failed to create job");
+  return row;
+}
+
+export async function getJobById(id: string): Promise<JobRow | null> {
+  return queryOne<JobRow>(`SELECT * FROM jobs WHERE id = $1`, [id]);
+}
+
+export async function markJobProcessing(id: string): Promise<void> {
+  await query(
+    `UPDATE jobs SET status = 'processing', updated_at = now() WHERE id = $1`,
+    [id]
+  );
+}
+
+export async function markJobSucceeded(
+  id: string,
+  result: SEOPostV1,
+  rendered: { markdown?: string; html?: string }
+): Promise<void> {
+  await query(
+    `UPDATE jobs SET status = 'succeeded', result = $2, rendered = $3, updated_at = now() WHERE id = $1`,
+    [id, JSON.stringify(result), JSON.stringify(rendered)]
+  );
+}
+
+export async function markJobFailed(
+  id: string,
+  errorCode: string,
+  errorMessage: string
+): Promise<void> {
+  await query(
+    `UPDATE jobs SET status = 'failed', error_code = $2, error_message = $3, updated_at = now() WHERE id = $1`,
+    [id, errorCode, errorMessage]
+  );
+}
+
+// ---------- Access requests ----------
+
+export async function createAccessRequest(params: {
+  customerId: string;
+  requestedPlan: string;
+  reason?: string;
+}): Promise<void> {
+  await query(
+    `INSERT INTO access_requests (id, customer_id, requested_plan, reason)
+     VALUES ($1, $2, $3, $4)`,
+    [newAccessRequestId(), params.customerId, params.requestedPlan, params.reason ?? null]
+  );
+}
+
+export async function listAccessRequestsForCustomer(customerId: string) {
+  return query(
+    `SELECT * FROM access_requests WHERE customer_id = $1 ORDER BY created_at DESC`,
+    [customerId]
+  );
+}
+
+// ---------- Idempotency (for /v1/generate) ----------
+
+export async function findIdempotencyRecord(
+  apiKeyId: string,
+  idempotencyKey: string
+): Promise<{ request_hash: string; response: unknown; status_code: number } | null> {
+  return queryOne(
+    `SELECT request_hash, response, status_code FROM idempotency_records WHERE api_key_id = $1 AND idempotency_key = $2`,
+    [apiKeyId, idempotencyKey]
+  );
+}
+
+export async function saveIdempotencyRecord(params: {
+  apiKeyId: string;
+  idempotencyKey: string;
+  requestHash: string;
+  response: unknown;
+  statusCode: number;
+}): Promise<void> {
+  await query(
+    `INSERT INTO idempotency_records (api_key_id, idempotency_key, request_hash, response, status_code)
+     VALUES ($1,$2,$3,$4,$5)
+     ON CONFLICT (api_key_id, idempotency_key) DO NOTHING`,
+    [
+      params.apiKeyId,
+      params.idempotencyKey,
+      params.requestHash,
+      JSON.stringify(params.response),
+      params.statusCode,
+    ]
+  );
+}

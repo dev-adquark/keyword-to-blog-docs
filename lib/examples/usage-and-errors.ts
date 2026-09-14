@@ -31,6 +31,12 @@ export const usageResponseExample = {
     posts: undefined,
     requests: undefined,
   },
+  daily: {
+    limit: growth.requestsPerDay,
+    used: 12,
+    remaining: growth.requestsPerDay - 12,
+    resetAt: "2026-09-15T00:00:00.000Z",
+  },
 } satisfies UsageResponseV1;
 
 export const usageResponseAfterGenerationExample = {

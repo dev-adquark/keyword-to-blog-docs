@@ -23,8 +23,11 @@ export function Header() {
           <Button href="/docs/quickstart" variant="ghost" size="sm">
             Docs
           </Button>
-          <Button href="/docs/quickstart#get-an-api-key" size="sm">
-            Get API key
+          <Button href="/login" variant="ghost" size="sm">
+            Log in
+          </Button>
+          <Button href="/signup" size="sm">
+            Sign up
           </Button>
         </div>
       </div>
