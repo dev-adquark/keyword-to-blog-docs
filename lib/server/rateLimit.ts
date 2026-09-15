@@ -181,19 +181,50 @@ export async function peekDailyUsage(
 }
 
 // ---------- Generic abuse rate limiting (auth endpoints, not tied to a plan) ----------
+//
+// Unlike the paid-API quota limiter above (which must fail closed — a Redis
+// outage must never grant unlimited paid usage), these guard signup/login/
+// OTP abuse as defense-in-depth on top of real auth checks (password
+// verification, per-OTP attempt caps). Failing closed here would turn a
+// Redis hiccup into a total signup/login outage, which is worse than
+// briefly losing the extra abuse layer — so these fail OPEN, loudly logged.
 
-/** Atomic fixed-window counter for any key — signup/login/OTP abuse limits, etc. */
+/** Atomic fixed-window counter for any key — signup/login/OTP abuse limits, etc.
+ * Fails open (allowed: true) if Redis itself is unreachable. */
 export async function consumeFixedWindowLimit(
   key: string,
   limit: number,
   windowSeconds: number
 ): Promise<{ allowed: boolean; remaining: number }> {
-  return checkWindow(key, limit, windowSeconds);
+  try {
+    return await checkWindow(key, limit, windowSeconds);
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "rate_limit_check_failed_open",
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return { allowed: true, remaining: limit };
+  }
 }
 
-/** Atomic cooldown gate: true the first time within `seconds`, false while still cooling down. */
+/** Atomic cooldown gate: true the first time within `seconds`, false while
+ * still cooling down. Fails open (true) if Redis itself is unreachable. */
 export async function consumeCooldown(key: string, seconds: number): Promise<boolean> {
-  const redis = getRedis();
-  const claimed = await redis.set(key, "1", { nx: true, ex: seconds });
-  return Boolean(claimed);
+  try {
+    const redis = getRedis();
+    const claimed = await redis.set(key, "1", { nx: true, ex: seconds });
+    return Boolean(claimed);
+  } catch (err) {
+    console.error(
+      JSON.stringify({
+        level: "error",
+        message: "cooldown_check_failed_open",
+        error: err instanceof Error ? err.message : String(err),
+      })
+    );
+    return true;
+  }
 }
