@@ -11,7 +11,7 @@ import { ApiError } from "./apiErrors";
 /** Canonical word count — the same source used for both metering and constraint checks. */
 export function countWords(post: SEOPostV1): number {
   return post.sections.reduce(
-    (sum, s) => sum + s.contentMarkdown.split(/\s+/).filter(Boolean).length,
+    (sum, s) => sum + (s.contentMarkdown ?? "").split(/\s+/).filter(Boolean).length,
     0
   );
 }
@@ -89,7 +89,7 @@ export function renderMarkdown(post: SEOPostV1): string {
   const parts = [`# ${post.outline.h1}`];
   for (const s of post.sections) {
     if (s.heading) parts.push(`## ${s.heading}`);
-    parts.push(s.contentMarkdown);
+    if (s.contentMarkdown) parts.push(s.contentMarkdown);
     if (s.callout) parts.push(`> **${s.callout.label}:** ${s.callout.text}`);
   }
   if (post.faqs?.length) {
@@ -106,7 +106,7 @@ export function renderHtml(post: SEOPostV1): string {
   const parts = [`<h1>${escapeHtml(post.outline.h1)}</h1>`];
   for (const s of post.sections) {
     if (s.heading) parts.push(`<h2>${escapeHtml(s.heading)}</h2>`);
-    parts.push(paragraphsToHtml(s.contentMarkdown));
+    if (s.contentMarkdown) parts.push(paragraphsToHtml(s.contentMarkdown));
     if (s.callout) {
       parts.push(
         `<blockquote><strong>${escapeHtml(s.callout.label)}:</strong> ${escapeHtml(s.callout.text)}</blockquote>`

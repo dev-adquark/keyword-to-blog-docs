@@ -114,14 +114,22 @@ export const seoPostSchema = z.object({
   }),
   sections: z
     .array(
-      z.object({
-        type: z.enum(["introduction", "body", "faq", "conclusion", "callout"]),
-        heading: z.string().optional(),
-        contentMarkdown: z.string().min(1),
-        callout: z
-          .object({ label: z.string(), text: z.string() })
-          .optional(),
-      })
+      z
+        .object({
+          type: z.enum(["introduction", "body", "faq", "conclusion", "callout"]),
+          heading: z.string().optional(),
+          // A pure callout section legitimately carries its content in
+          // `callout`, not `contentMarkdown` — real model output does this
+          // (confirmed against a live Claude response). Every other section
+          // still needs real prose.
+          contentMarkdown: z.string().min(1).optional(),
+          callout: z
+            .object({ label: z.string(), text: z.string() })
+            .optional(),
+        })
+        .refine((s) => Boolean(s.contentMarkdown) || Boolean(s.callout), {
+          message: "Section must have either contentMarkdown or a callout.",
+        })
     )
     .min(1),
   faqs: z

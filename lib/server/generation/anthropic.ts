@@ -120,6 +120,16 @@ export class AnthropicProvider implements AIProvider {
         const parsed = extractJson(text);
         const result = seoPostSchema.safeParse(parsed);
         if (!result.success) {
+          // Safe to log — this is the shape of the model's own JSON output,
+          // never a secret. Without this, every schema failure looked
+          // identical and undiagnosable in production.
+          console.error(
+            JSON.stringify({
+              level: "error",
+              message: "generation_schema_validation_failed",
+              issues: result.error.issues.map((i) => ({ path: i.path, message: i.message })),
+            })
+          );
           throw new Error("Model output failed schema validation");
         }
         return result.data as SEOPostV1;

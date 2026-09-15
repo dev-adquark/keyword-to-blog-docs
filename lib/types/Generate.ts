@@ -37,7 +37,8 @@ export interface SEOPostV1 {
   sections: Array<{
     type: "introduction" | "body" | "faq" | "conclusion" | "callout";
     heading?: string;
-    contentMarkdown: string;
+    /** Optional only for a pure callout section — every other section has real prose. */
+    contentMarkdown?: string;
     callout?: { label: string; text: string };
   }>;
   faqs?: Array<{ question: string; answer: string }>;
