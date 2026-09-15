@@ -7,7 +7,10 @@ import {
   newUsageId,
   newJobId,
   newAccessRequestId,
+  newOtpId,
+  newSessionId,
 } from "./ids";
+import type { OtpPurpose } from "./otp";
 import { DEFAULT_PLAN_ID } from "@/lib/plans";
 import type { GenerateRequestV1, SEOPostV1 } from "@/lib/types";
 
@@ -17,8 +20,30 @@ export interface UserRow {
   password_hash: string;
   name: string;
   status: string;
+  email_verified_at: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface OtpRow {
+  id: string;
+  user_id: string;
+  purpose: OtpPurpose;
+  otp_hash: string;
+  expires_at: string;
+  attempts: number;
+  verified_at: string | null;
+  created_at: string;
+}
+
+export interface SessionRow {
+  id: string;
+  user_id: string;
+  session_token_hash: string;
+  expires_at: string;
+  created_at: string;
+  last_seen_at: string;
+  revoked_at: string | null;
 }
 
 export interface CustomerRow {
@@ -141,6 +166,129 @@ export async function updateCustomerPlan(
   await query(
     `UPDATE customers SET plan = $2, updated_at = now() WHERE id = $1`,
     [customerId, plan]
+  );
+}
+
+export async function markUserEmailVerified(userId: string): Promise<void> {
+  await query(
+    `UPDATE users SET email_verified_at = now(), updated_at = now() WHERE id = $1`,
+    [userId]
+  );
+}
+
+export async function updateUserPassword(
+  userId: string,
+  passwordHash: string
+): Promise<void> {
+  await query(
+    `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`,
+    [userId, passwordHash]
+  );
+}
+
+// ---------- One-time codes (email verification + password reset) ----------
+
+/** Issues a fresh OTP, first invalidating any prior unverified code for the
+ * same user + purpose so only the most recently sent code can ever verify. */
+export async function createOtp(params: {
+  userId: string;
+  purpose: OtpPurpose;
+  otpHash: string;
+  expiresAt: Date;
+}): Promise<OtpRow> {
+  return withClient(async (client) => {
+    await client.query(
+      `DELETE FROM otps WHERE user_id = $1 AND purpose = $2 AND verified_at IS NULL`,
+      [params.userId, params.purpose]
+    );
+    const id = newOtpId();
+    const row = await client.query<OtpRow>(
+      `INSERT INTO otps (id, user_id, purpose, otp_hash, expires_at)
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [id, params.userId, params.purpose, params.otpHash, params.expiresAt.toISOString()]
+    );
+    return row.rows[0]!;
+  });
+}
+
+/** The most recent not-yet-verified code for this user + purpose, if any. */
+export async function findLatestPendingOtp(
+  userId: string,
+  purpose: OtpPurpose
+): Promise<OtpRow | null> {
+  return queryOne<OtpRow>(
+    `SELECT * FROM otps WHERE user_id = $1 AND purpose = $2 AND verified_at IS NULL
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, purpose]
+  );
+}
+
+export async function findOtpById(id: string): Promise<OtpRow | null> {
+  return queryOne<OtpRow>(`SELECT * FROM otps WHERE id = $1`, [id]);
+}
+
+export async function incrementOtpAttempts(id: string): Promise<number> {
+  const row = await queryOne<{ attempts: number }>(
+    `UPDATE otps SET attempts = attempts + 1 WHERE id = $1 RETURNING attempts`,
+    [id]
+  );
+  return row?.attempts ?? OTP_MAX_ATTEMPTS_FALLBACK;
+}
+
+const OTP_MAX_ATTEMPTS_FALLBACK = 999; // row vanished mid-request — treat as exhausted, never as fresh.
+
+export async function markOtpVerified(id: string): Promise<void> {
+  await query(`UPDATE otps SET verified_at = now() WHERE id = $1`, [id]);
+}
+
+export async function deleteOtp(id: string): Promise<void> {
+  await query(`DELETE FROM otps WHERE id = $1`, [id]);
+}
+
+// ---------- Server-side browser sessions ----------
+
+export async function createSession(params: {
+  userId: string;
+  tokenHash: string;
+  expiresAt: Date;
+}): Promise<SessionRow> {
+  const id = newSessionId();
+  const row = await queryOne<SessionRow>(
+    `INSERT INTO sessions (id, user_id, session_token_hash, expires_at)
+     VALUES ($1, $2, $3, $4) RETURNING *`,
+    [id, params.userId, params.tokenHash, params.expiresAt.toISOString()]
+  );
+  if (!row) throw new Error("Failed to create session");
+  return row;
+}
+
+/** Only ever returns a session that is neither revoked nor past its absolute expiry. */
+export async function findActiveSessionByTokenHash(
+  tokenHash: string
+): Promise<SessionRow | null> {
+  return queryOne<SessionRow>(
+    `SELECT * FROM sessions
+     WHERE session_token_hash = $1 AND revoked_at IS NULL AND expires_at > now()`,
+    [tokenHash]
+  );
+}
+
+export async function touchSession(id: string): Promise<void> {
+  await query(`UPDATE sessions SET last_seen_at = now() WHERE id = $1`, [id]);
+}
+
+export async function revokeSession(tokenHash: string): Promise<void> {
+  await query(
+    `UPDATE sessions SET revoked_at = now() WHERE session_token_hash = $1 AND revoked_at IS NULL`,
+    [tokenHash]
+  );
+}
+
+/** Called on password reset — forces every other logged-in browser to require a fresh login. */
+export async function revokeAllSessionsForUser(userId: string): Promise<void> {
+  await query(
+    `UPDATE sessions SET revoked_at = now() WHERE user_id = $1 AND revoked_at IS NULL`,
+    [userId]
   );
 }
 

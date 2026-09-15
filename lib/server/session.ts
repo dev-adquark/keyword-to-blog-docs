@@ -1,39 +1,29 @@
-import { SignJWT, jwtVerify } from "jose";
+import "server-only";
+import { randomBytes, createHash } from "node:crypto";
 
 export const SESSION_COOKIE = "ktb_session";
-const SESSION_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 days
 
-function secretKey(authSecret: string) {
-  return new TextEncoder().encode(authSecret);
+/**
+ * Absolute server-side backstop on how long a session row stays valid — NOT
+ * the cookie's lifetime. The cookie itself carries no Max-Age/Expires, so it
+ * behaves as a true browser-session cookie (gone when the browser fully
+ * closes); this bound only protects against a session that's never revoked
+ * because the browser is simply never closed.
+ */
+const SESSION_ABSOLUTE_TTL_SECONDS = 60 * 60 * 24 * 14; // 14 days
+
+/** The random, opaque token that goes in the cookie. Never stored raw. */
+export function generateSessionToken(): string {
+  return randomBytes(32).toString("base64url");
 }
 
-export interface SessionPayload {
-  userId: string;
-  [key: string]: unknown;
+/** What's actually persisted server-side — a leaked DB row can't be replayed as a session. */
+export function hashSessionToken(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
 }
 
-export async function signSession(
-  payload: SessionPayload,
-  authSecret: string
-): Promise<string> {
-  return new SignJWT(payload)
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(`${SESSION_TTL_SECONDS}s`)
-    .sign(secretKey(authSecret));
-}
-
-export async function verifySession(
-  token: string,
-  authSecret: string
-): Promise<SessionPayload | null> {
-  try {
-    const { payload } = await jwtVerify(token, secretKey(authSecret));
-    if (typeof payload.userId !== "string") return null;
-    return payload as SessionPayload;
-  } catch {
-    return null;
-  }
+export function sessionExpiryDate(): Date {
+  return new Date(Date.now() + SESSION_ABSOLUTE_TTL_SECONDS * 1000);
 }
 
 export const sessionCookieOptions = {
@@ -41,5 +31,5 @@ export const sessionCookieOptions = {
   secure: process.env.NODE_ENV === "production",
   sameSite: "lax" as const,
   path: "/",
-  maxAge: SESSION_TTL_SECONDS,
+  // Deliberately no maxAge/expires.
 };

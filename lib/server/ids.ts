@@ -11,3 +11,5 @@ export const newUsageId = () => id("use");
 export const newJobId = () => id("job");
 export const newAccessRequestId = () => id("ar");
 export const newRequestId = () => id("req");
+export const newOtpId = () => id("otp");
+export const newSessionId = () => id("sess");

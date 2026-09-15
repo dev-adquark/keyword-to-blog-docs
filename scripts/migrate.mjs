@@ -17,7 +17,7 @@ async function main() {
   const sql = readFileSync(path.join(__dirname, "..", "db", "schema.sql"), "utf8");
   const client = new pg.Client({
     connectionString,
-    ssl: connectionString.includes("sslmode=disable") ? false : { rejectUnauthorized: false },
+    ssl: connectionString.includes("sslmode=disable") ? false : { rejectUnauthorized: true },
   });
 
   await client.connect();

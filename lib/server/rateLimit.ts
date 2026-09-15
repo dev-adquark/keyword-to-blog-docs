@@ -179,3 +179,21 @@ export async function peekDailyUsage(
     resetAt: nextUtcMidnightUnix(now),
   };
 }
+
+// ---------- Generic abuse rate limiting (auth endpoints, not tied to a plan) ----------
+
+/** Atomic fixed-window counter for any key — signup/login/OTP abuse limits, etc. */
+export async function consumeFixedWindowLimit(
+  key: string,
+  limit: number,
+  windowSeconds: number
+): Promise<{ allowed: boolean; remaining: number }> {
+  return checkWindow(key, limit, windowSeconds);
+}
+
+/** Atomic cooldown gate: true the first time within `seconds`, false while still cooling down. */
+export async function consumeCooldown(key: string, seconds: number): Promise<boolean> {
+  const redis = getRedis();
+  const claimed = await redis.set(key, "1", { nx: true, ex: seconds });
+  return Boolean(claimed);
+}

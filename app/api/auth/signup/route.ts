@@ -1,10 +1,13 @@
 import { NextResponse } from "next/server";
 import { signupSchema } from "@/lib/server/validation";
 import { hashPassword, passwordMeetsPolicy } from "@/lib/server/password";
-import { createUserAndCustomer, findUserByEmail } from "@/lib/server/repository";
-import { signSession, sessionCookieOptions, SESSION_COOKIE } from "@/lib/server/session";
+import { createUserAndCustomer, findUserByEmail, createOtp } from "@/lib/server/repository";
+import { generateOtp, hashOtp, otpExpiryDate } from "@/lib/server/otp";
+import { sendVerificationEmail } from "@/lib/server/authEmail";
 import { env } from "@/lib/server/env";
 import { notifyOwner, safeAfter } from "@/lib/server/notifications";
+import { consumeFixedWindowLimit } from "@/lib/server/rateLimit";
+import { getClientIp } from "@/lib/server/clientIp";
 import { DEFAULT_PLAN_ID } from "@/lib/plans";
 
 export const runtime = "nodejs";
@@ -22,6 +25,15 @@ function getSignupAuthSecret(): string {
 }
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req.headers);
+  const ipLimit = await consumeFixedWindowLimit(`rl:signup:ip:${ip}`, 10, 60 * 60);
+  if (!ipLimit.allowed) {
+    return NextResponse.json(
+      { code: "RATE_LIMITED", message: "Too many signup attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
+
   let parsed;
   try {
     const body = await req.json();
@@ -68,7 +80,7 @@ export async function POST(req: Request) {
   }
 
   try {
-    const authSecret = getSignupAuthSecret();
+    getSignupAuthSecret();
     console.info("signup_debug", { step: "auth_secret_ready" });
 
     const existing = await findUserByEmail(email);
@@ -88,9 +100,18 @@ export async function POST(req: Request) {
     const { user } = await createUserAndCustomer({ name, email, passwordHash });
     console.info("signup_debug", { step: "user_customer_insert_complete", userId: user.id });
 
-    console.info("signup_debug", { step: "session_sign_start", userId: user.id });
-    const token = await signSession({ userId: user.id }, authSecret);
-    console.info("signup_debug", { step: "session_sign_complete", userId: user.id });
+    // Email verification is mandatory before any session is issued — the
+    // account exists but stays unverified/unauthenticated until the OTP
+    // below is confirmed via POST /api/auth/verify-email.
+    const otp = generateOtp();
+    await createOtp({
+      userId: user.id,
+      purpose: "email_verification",
+      otpHash: hashOtp(otp),
+      expiresAt: otpExpiryDate(),
+    });
+    const emailResult = await sendVerificationEmail({ to: user.email, otp });
+    console.info("signup_debug", { step: "verification_email_sent", ok: emailResult.ok });
 
     const signedUpAt = new Date().toISOString();
     safeAfter(() =>
@@ -104,9 +125,7 @@ export async function POST(req: Request) {
       })
     );
 
-    const res = NextResponse.json({ ok: true }, { status: 201 });
-    res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions);
-    return res;
+    return NextResponse.json({ ok: true, email: user.email }, { status: 201 });
   } catch (err) {
     const message = err instanceof Error && /duplicate|unique|email/i.test(err.message)
       ? "An account with this email already exists."

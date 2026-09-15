@@ -1,10 +1,17 @@
 import { NextResponse } from "next/server";
 import { loginSchema } from "@/lib/server/validation";
 import { verifyPassword } from "@/lib/server/password";
-import { findUserByEmail } from "@/lib/server/repository";
-import { signSession, sessionCookieOptions, SESSION_COOKIE } from "@/lib/server/session";
-import { env } from "@/lib/server/env";
+import { findUserByEmail, createSession } from "@/lib/server/repository";
+import {
+  SESSION_COOKIE,
+  sessionCookieOptions,
+  generateSessionToken,
+  hashSessionToken,
+  sessionExpiryDate,
+} from "@/lib/server/session";
 import { notifyOwner, recordRepeatedViolation, safeAfter } from "@/lib/server/notifications";
+import { consumeFixedWindowLimit } from "@/lib/server/rateLimit";
+import { getClientIp } from "@/lib/server/clientIp";
 
 export const runtime = "nodejs";
 
@@ -28,6 +35,15 @@ function alertOnRepeatedLoginFailure(email: string): void {
 }
 
 export async function POST(req: Request) {
+  const ip = getClientIp(req.headers);
+  const ipLimit = await consumeFixedWindowLimit(`rl:login:ip:${ip}`, 20, 15 * 60);
+  if (!ipLimit.allowed) {
+    return NextResponse.json(
+      { code: "RATE_LIMITED", message: "Too many login attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
+
   const body = await req.json().catch(() => null);
   const parsed = body ? loginSchema.safeParse(body) : null;
   if (!parsed || !parsed.success) {
@@ -35,6 +51,20 @@ export async function POST(req: Request) {
   }
 
   const { email, password } = parsed.data;
+
+  // Per-email brute-force gate, on top of the per-IP one above.
+  const emailLimit = await consumeFixedWindowLimit(
+    `rl:login:email:${email.toLowerCase()}`,
+    10,
+    15 * 60
+  );
+  if (!emailLimit.allowed) {
+    return NextResponse.json(
+      { code: "RATE_LIMITED", message: "Too many login attempts. Please try again later." },
+      { status: 429 }
+    );
+  }
+
   const user = await findUserByEmail(email);
   if (!user || user.status !== "active") {
     // Same response whether the email exists or not — avoids account enumeration.
@@ -48,8 +78,25 @@ export async function POST(req: Request) {
     return NextResponse.json(GENERIC_ERROR, { status: 401 });
   }
 
-  const token = await signSession({ userId: user.id }, env.AUTH_SECRET);
+  if (!user.email_verified_at) {
+    return NextResponse.json(
+      {
+        code: "EMAIL_NOT_VERIFIED",
+        message: "Your email is not verified.",
+        email: user.email,
+      },
+      { status: 403 }
+    );
+  }
+
+  const rawToken = generateSessionToken();
+  await createSession({
+    userId: user.id,
+    tokenHash: hashSessionToken(rawToken),
+    expiresAt: sessionExpiryDate(),
+  });
+
   const res = NextResponse.json({ ok: true }, { status: 200 });
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions);
+  res.cookies.set(SESSION_COOKIE, rawToken, sessionCookieOptions);
   return res;
 }

@@ -54,6 +54,38 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+const otpCodeSchema = z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code.");
+const emailSchema = z.string().trim().email("Please provide a valid email address.");
+
+export const verifyEmailSchema = z.object({
+  email: emailSchema,
+  otp: otpCodeSchema,
+});
+
+export const resendVerificationSchema = z.object({
+  email: emailSchema,
+});
+
+export const forgotPasswordSchema = z.object({
+  email: emailSchema,
+});
+
+export const verifyResetOtpSchema = z.object({
+  email: emailSchema,
+  otp: otpCodeSchema,
+});
+
+export const resetPasswordSchema = z
+  .object({
+    resetToken: z.string().min(1),
+    newPassword: z.string().min(10, "Password must be at least 10 characters long."),
+    confirmPassword: z.string().min(1),
+  })
+  .refine((data) => data.newPassword === data.confirmPassword, {
+    message: "Passwords do not match.",
+    path: ["confirmPassword"],
+  });
+
 export const createApiKeySchema = z.object({
   name: z.string().trim().min(1).max(100),
   environment: z.enum(["live", "test"]).default("live"),

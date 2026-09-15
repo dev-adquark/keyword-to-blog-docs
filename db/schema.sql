@@ -4,14 +4,17 @@
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 CREATE TABLE IF NOT EXISTS users (
-  id             TEXT PRIMARY KEY,
-  email          TEXT NOT NULL UNIQUE,
-  password_hash  TEXT NOT NULL,
-  name           TEXT NOT NULL,
-  status         TEXT NOT NULL DEFAULT 'active', -- active | disabled
-  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+  id                 TEXT PRIMARY KEY,
+  email              TEXT NOT NULL UNIQUE,
+  password_hash      TEXT NOT NULL,
+  name               TEXT NOT NULL,
+  status             TEXT NOT NULL DEFAULT 'active', -- active | disabled
+  email_verified_at  TIMESTAMPTZ, -- NULL until the signup OTP is verified
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+-- Existing installs: adds the column without recreating the table.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
 
 CREATE TABLE IF NOT EXISTS customers (
   id          TEXT PRIMARY KEY,
@@ -85,6 +88,34 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (api_key_id, idempotency_key)
 );
+
+-- One-time codes for both signup email verification and password reset,
+-- distinguished by `purpose`. Only a hash of the code is ever stored.
+CREATE TABLE IF NOT EXISTS otps (
+  id           TEXT PRIMARY KEY,
+  user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  purpose      TEXT NOT NULL, -- email_verification | password_reset
+  otp_hash     TEXT NOT NULL,
+  expires_at   TIMESTAMPTZ NOT NULL,
+  attempts     INT NOT NULL DEFAULT 0,
+  verified_at  TIMESTAMPTZ,
+  created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_otps_user_purpose_created ON otps(user_id, purpose, created_at DESC);
+
+-- Server-side browser sessions. The cookie holds only the raw opaque token;
+-- only its hash is ever persisted, so a DB leak can't be replayed as a session.
+CREATE TABLE IF NOT EXISTS sessions (
+  id                  TEXT PRIMARY KEY,
+  user_id             TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  session_token_hash  TEXT NOT NULL,
+  expires_at          TIMESTAMPTZ NOT NULL,
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT now(),
+  last_seen_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  revoked_at          TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(session_token_hash);
 
 CREATE TABLE IF NOT EXISTS access_requests (
   id               TEXT PRIMARY KEY,

@@ -1,28 +1,36 @@
 import "server-only";
 import { cookies } from "next/headers";
-import { SESSION_COOKIE, verifySession } from "./session";
-import { env } from "./env";
-import { findUserById, findCustomerByUserId, type UserRow, type CustomerRow } from "./repository";
+import { SESSION_COOKIE, hashSessionToken } from "./session";
+import {
+  findActiveSessionByTokenHash,
+  touchSession,
+  findUserById,
+  findCustomerByUserId,
+  type UserRow,
+  type CustomerRow,
+} from "./repository";
 
 export interface CurrentSession {
   user: UserRow;
   customer: CustomerRow;
 }
 
-/** Returns the signed-in user + customer, or null if there's no valid session. */
+/** Returns the signed-in user + customer, or null if there's no valid, unrevoked session. */
 export async function getCurrentSession(): Promise<CurrentSession | null> {
   const cookieStore = await cookies();
   const token = cookieStore.get(SESSION_COOKIE)?.value;
   if (!token) return null;
 
-  const payload = await verifySession(token, env.AUTH_SECRET);
-  if (!payload) return null;
+  const session = await findActiveSessionByTokenHash(hashSessionToken(token));
+  if (!session) return null;
 
-  const user = await findUserById(payload.userId);
+  const user = await findUserById(session.user_id);
   if (!user || user.status !== "active") return null;
 
   const customer = await findCustomerByUserId(user.id);
   if (!customer) return null;
+
+  touchSession(session.id).catch(() => {});
 
   return { user, customer };
 }
