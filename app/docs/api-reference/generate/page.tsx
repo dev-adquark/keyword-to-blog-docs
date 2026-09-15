@@ -74,9 +74,21 @@ export default function GenerateEndpointPage() {
             <div>
               <h3 className="mb-2 font-display text-sm font-medium text-ink">Prohibited input constraints</h3>
               <p className="font-body text-[14px] text-muted">
-                Requests containing content matching the prohibited-input filter are rejected before
-                generation starts with <code className="font-mono">PROHIBITED_INPUT</code> — see{" "}
+                If the model declines to generate content for a request (its own safety system refuses),
+                the request fails with <code className="font-mono">PROHIBITED_INPUT</code> instead of
+                returning partial or fabricated content — see{" "}
                 <code className="font-mono">/docs/error-codes</code>.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="mb-2 font-display text-sm font-medium text-ink">Idempotency</h3>
+              <p className="font-body text-[14px] text-muted">
+                Pass a key via the <code className="font-mono">Idempotency-Key</code> header or the body&rsquo;s{" "}
+                <code className="font-mono">idempotencyKey</code> field. The same key with the same request
+                body returns the original response again — generation only ever runs once, so retries after
+                a dropped connection can&rsquo;t double-bill. Reusing the same key with a different body
+                returns <code className="font-mono">VALIDATION_ERROR</code>.
               </p>
             </div>
 

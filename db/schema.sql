@@ -51,10 +51,12 @@ CREATE TABLE IF NOT EXISTS usage_events (
   status_code   INT NOT NULL,
   success       BOOLEAN NOT NULL,
   words         INT NOT NULL DEFAULT 0,
+  posts         INT NOT NULL DEFAULT 0, -- 1 per successfully generated post, 0 on failure
   duration_ms   INT NOT NULL DEFAULT 0,
   counted_toward_quota BOOLEAN NOT NULL DEFAULT false,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS posts INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_usage_api_key_created ON usage_events(api_key_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_customer_created ON usage_events(customer_id, created_at);
 
@@ -116,6 +118,23 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(session_token_hash);
+
+-- Audit trail for webhook delivery attempts — one row per job per event,
+-- updated in place across retries so delivery outcomes are queryable after
+-- the fact instead of being fire-and-forget.
+CREATE TABLE IF NOT EXISTS webhook_deliveries (
+  id             TEXT PRIMARY KEY,
+  job_id         TEXT NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+  event          TEXT NOT NULL, -- job.succeeded | job.failed
+  url            TEXT NOT NULL,
+  status         TEXT NOT NULL DEFAULT 'pending', -- pending | delivered | failed | blocked
+  attempts       INT NOT NULL DEFAULT 0,
+  last_status_code INT,
+  last_error     TEXT,
+  created_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at     TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_webhook_deliveries_job ON webhook_deliveries(job_id);
 
 CREATE TABLE IF NOT EXISTS access_requests (
   id               TEXT PRIMARY KEY,

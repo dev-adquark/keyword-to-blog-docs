@@ -31,6 +31,26 @@ describe("generateRequestSchema", () => {
     });
     expect(result.success).toBe(false);
   });
+
+  it("rejects minWords greater than maxWords", () => {
+    const result = generateRequestSchema.safeParse({
+      ...valid,
+      constraints: { maxWords: 500, minWords: 5000 },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts minWords equal to maxWords", () => {
+    const result = generateRequestSchema.safeParse({
+      ...valid,
+      constraints: { maxWords: 500, minWords: 500 },
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts a request with no minWords at all", () => {
+    expect(generateRequestSchema.safeParse(valid).success).toBe(true);
+  });
 });
 
 describe("signupSchema", () => {

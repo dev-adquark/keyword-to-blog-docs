@@ -9,6 +9,7 @@ import {
   newAccessRequestId,
   newOtpId,
   newSessionId,
+  newWebhookDeliveryId,
 } from "./ids";
 import type { OtpPurpose } from "./otp";
 import { DEFAULT_PLAN_ID } from "@/lib/plans";
@@ -363,13 +364,16 @@ export async function recordUsageEvent(params: {
   statusCode: number;
   success: boolean;
   words: number;
+  /** 1 for a successfully generated post, 0 otherwise — a distinct billable
+   * unit from `words`, tracked separately per the metering contract. */
+  posts?: number;
   durationMs: number;
   countedTowardQuota: boolean;
 }): Promise<void> {
   await query(
     `INSERT INTO usage_events
-      (id, api_key_id, customer_id, endpoint, request_id, status_code, success, words, duration_ms, counted_toward_quota)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+      (id, api_key_id, customer_id, endpoint, request_id, status_code, success, words, posts, duration_ms, counted_toward_quota)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
     [
       newUsageId(),
       params.apiKeyId,
@@ -379,6 +383,7 @@ export async function recordUsageEvent(params: {
       params.statusCode,
       params.success,
       params.words,
+      params.posts ?? (params.success ? 1 : 0),
       params.durationMs,
       params.countedTowardQuota,
     ]
@@ -388,16 +393,18 @@ export async function recordUsageEvent(params: {
 export async function getUsageSince(
   customerId: string,
   since: Date
-): Promise<{ requests: number; words: number }> {
-  const row = await queryOne<{ requests: string; words: string }>(
+): Promise<{ requests: number; words: number; posts: number }> {
+  const row = await queryOne<{ requests: string; words: string; posts: string }>(
     `SELECT COUNT(*) FILTER (WHERE counted_toward_quota) AS requests,
-            COALESCE(SUM(words) FILTER (WHERE counted_toward_quota), 0) AS words
+            COALESCE(SUM(words) FILTER (WHERE counted_toward_quota), 0) AS words,
+            COALESCE(SUM(posts) FILTER (WHERE counted_toward_quota), 0) AS posts
      FROM usage_events WHERE customer_id = $1 AND created_at >= $2`,
     [customerId, since.toISOString()]
   );
   return {
     requests: Number(row?.requests ?? 0),
     words: Number(row?.words ?? 0),
+    posts: Number(row?.posts ?? 0),
   };
 }
 
@@ -437,9 +444,17 @@ export async function getJobById(id: string): Promise<JobRow | null> {
   return queryOne<JobRow>(`SELECT * FROM jobs WHERE id = $1`, [id]);
 }
 
-export async function markJobProcessing(id: string): Promise<void> {
-  await query(
-    `UPDATE jobs SET status = 'processing', updated_at = now() WHERE id = $1`,
+/**
+ * Atomically claims a queued job for processing — `WHERE status = 'queued'`
+ * makes this a single conditional UPDATE, so two concurrent invocations
+ * (e.g. a QStash redelivery racing the original attempt) can never both
+ * "win" the claim and double-process/double-bill the same job. Returns the
+ * claimed row, or null if it was already claimed (or isn't queued).
+ */
+export async function claimJobForProcessing(id: string): Promise<JobRow | null> {
+  return queryOne<JobRow>(
+    `UPDATE jobs SET status = 'processing', updated_at = now()
+     WHERE id = $1 AND status = 'queued' RETURNING *`,
     [id]
   );
 }
@@ -463,6 +478,59 @@ export async function markJobFailed(
   await query(
     `UPDATE jobs SET status = 'failed', error_code = $2, error_message = $3, updated_at = now() WHERE id = $1`,
     [id, errorCode, errorMessage]
+  );
+}
+
+// ---------- Webhook delivery audit trail ----------
+
+export interface WebhookDeliveryRow {
+  id: string;
+  job_id: string;
+  event: string;
+  url: string;
+  status: "pending" | "delivered" | "failed" | "blocked";
+  attempts: number;
+  last_status_code: number | null;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export async function createWebhookDeliveryRecord(params: {
+  jobId: string;
+  event: "job.succeeded" | "job.failed";
+  url: string;
+}): Promise<WebhookDeliveryRow> {
+  const id = newWebhookDeliveryId();
+  const row = await queryOne<WebhookDeliveryRow>(
+    `INSERT INTO webhook_deliveries (id, job_id, event, url) VALUES ($1,$2,$3,$4) RETURNING *`,
+    [id, params.jobId, params.event, params.url]
+  );
+  if (!row) throw new Error("Failed to create webhook delivery record");
+  return row;
+}
+
+export async function updateWebhookDeliveryRecord(
+  id: string,
+  params: {
+    status: "delivered" | "failed" | "blocked";
+    attempts: number;
+    lastStatusCode?: number;
+    lastError?: string;
+  }
+): Promise<void> {
+  await query(
+    `UPDATE webhook_deliveries
+     SET status = $2, attempts = $3, last_status_code = $4, last_error = $5, updated_at = now()
+     WHERE id = $1`,
+    [id, params.status, params.attempts, params.lastStatusCode ?? null, params.lastError ?? null]
+  );
+}
+
+export async function listWebhookDeliveriesForJob(jobId: string): Promise<WebhookDeliveryRow[]> {
+  return query<WebhookDeliveryRow>(
+    `SELECT * FROM webhook_deliveries WHERE job_id = $1 ORDER BY created_at ASC`,
+    [jobId]
   );
 }
 

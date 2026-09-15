@@ -14,6 +14,8 @@ const routes = [
   "/docs/seo-formatting-guide",
   "/docs/billing-plans",
   "/docs/error-codes",
+  "/docs/examples",
+  "/docs/versioning",
   "/privacy",
   "/terms",
 ];

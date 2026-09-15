@@ -15,6 +15,7 @@ import { ApiError, errorResponse, internalErrorResponse } from "./apiErrors";
 import { checkAndConsumeRateLimit } from "./rateLimit";
 import { resolveRequestId } from "./requestId";
 import { notifyOwner, recordRepeatedViolation, safeAfter } from "./notifications";
+import { currentMonthBounds } from "./billingPeriod";
 
 /** Best-effort owner alert for repeated abuse on one endpoint — never blocks the request. */
 function alertOnRepeatedViolation(params: {
@@ -56,12 +57,6 @@ function alertOnRepeatedViolation(params: {
   });
 }
 
-function currentMonthBounds(): { start: Date; end: Date } {
-  const now = new Date();
-  const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-  const end = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-  return { start, end };
-}
 
 export interface ApiAuthContext {
   apiKey: ApiKeyRow;

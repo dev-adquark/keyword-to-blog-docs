@@ -2,11 +2,19 @@ import { NextResponse } from "next/server";
 import { authenticate } from "@/lib/server/withApiAuth";
 import { jobsCreateRequestSchema } from "@/lib/server/validation";
 import { ApiError, errorResponse, internalErrorResponse } from "@/lib/server/apiErrors";
-import { createJobRow, getJobById, markJobFailed } from "@/lib/server/repository";
+import {
+  createJobRow,
+  getJobById,
+  markJobFailed,
+  claimIdempotencyRequest,
+  updateIdempotencyRecord,
+} from "@/lib/server/repository";
 import { generateWebhookSecret } from "@/lib/server/webhooks";
 import { publishJobProcessingMessage, qstashConfigured } from "@/lib/server/qstash";
 import { processJob } from "@/lib/server/jobProcessor";
+import { readJsonBodyWithSizeLimit } from "@/lib/server/requestBody";
 import type { JobV1 } from "@/lib/types";
+import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -43,10 +51,13 @@ export async function POST(req: Request) {
   });
   if (!auth.ok) return auth.response;
   const { context, rateLimitHeaders } = auth;
-  const { requestId, apiKey, customer } = context;
+  const { requestId, apiKey, customer, plan } = context;
+  let idempotencyKey: string | null = null;
+  let requestHash = "";
+  let claimedIdempotency = false;
 
   try {
-    const body = await req.json().catch(() => null);
+    const body = await readJsonBodyWithSizeLimit(req);
     if (!body) throw new ApiError("VALIDATION_ERROR", "Request body must be valid JSON.");
 
     const parsed = jobsCreateRequestSchema.safeParse(body);
@@ -69,6 +80,39 @@ export async function POST(req: Request) {
       );
     }
 
+    // Idempotency: same atomic claim-then-replay pattern as /v1/generate —
+    // a repeated Idempotency-Key with the same body returns the original
+    // job instead of creating (and billing) a second one.
+    const explicitIdempotencyKey = req.headers.get("idempotency-key");
+    idempotencyKey = explicitIdempotencyKey ?? input.idempotencyKey ?? null;
+    requestHash = createHash("sha256").update(JSON.stringify(input)).digest("hex");
+
+    if (idempotencyKey) {
+      const claim = await claimIdempotencyRequest({
+        apiKeyId: apiKey.id,
+        idempotencyKey,
+        requestHash,
+        response: { status: "processing" },
+        statusCode: 202,
+      });
+      claimedIdempotency = claim.claimed;
+
+      if (!claim.claimed && claim.existing) {
+        if (claim.existing.request_hash !== requestHash) {
+          throw new ApiError(
+            "VALIDATION_ERROR",
+            "Idempotency-Key was already used with a different request body."
+          );
+        }
+        const res = NextResponse.json(claim.existing.response, {
+          status: claim.existing.status_code,
+        });
+        res.headers.set("X-Request-ID", requestId);
+        for (const [k, v] of Object.entries(rateLimitHeaders)) res.headers.set(k, v);
+        return res;
+      }
+    }
+
     const webhookSecret = input.webhook ? generateWebhookSecret() : undefined;
 
     const job = await createJobRow({
@@ -84,7 +128,7 @@ export async function POST(req: Request) {
 
     if (qstashConfigured()) {
       try {
-        await publishJobProcessingMessage(job.id);
+        await publishJobProcessingMessage(job.id, plan);
       } catch (err) {
         // The job row already exists — never leave it silently stuck in
         // "queued" with no way for the caller to know processing was never
@@ -116,11 +160,34 @@ export async function POST(req: Request) {
       ...(webhookSecret ? { webhookSigningSecret: webhookSecret } : {}),
     };
 
+    if (idempotencyKey) {
+      await updateIdempotencyRecord({
+        apiKeyId: apiKey.id,
+        idempotencyKey,
+        requestHash,
+        response: responseBody,
+        statusCode: 202,
+      });
+    }
+
     const res = NextResponse.json(responseBody, { status: 202 });
     res.headers.set("X-Request-ID", requestId);
     for (const [k, v] of Object.entries(rateLimitHeaders)) res.headers.set(k, v);
     return res;
   } catch (err) {
+    if (idempotencyKey && claimedIdempotency) {
+      await updateIdempotencyRecord({
+        apiKeyId: apiKey.id,
+        idempotencyKey,
+        requestHash,
+        response: {
+          error: err instanceof ApiError ? err.code : "INTERNAL_ERROR",
+          message: err instanceof Error ? err.message : "Job creation failed.",
+        },
+        statusCode: err instanceof ApiError ? 400 : 500,
+      }).catch(() => {});
+    }
+
     if (err instanceof ApiError) return errorResponse(err, requestId);
     return internalErrorResponse(requestId, err);
   }

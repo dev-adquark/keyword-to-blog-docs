@@ -45,10 +45,12 @@ export default function JobsCreateEndpointPage() {
               <h3 className="mb-2 font-display text-sm font-medium text-ink">Required fields</h3>
               <ul className="list-disc space-y-1.5 pl-5 font-body text-[14px] text-muted">
                 <li><code className="font-mono">generateRequest</code> — the same body shape as POST /v1/generate.</li>
+                <li><code className="font-mono">format.responseTypes</code> — which representations (<code className="font-mono">json</code>/<code className="font-mono">markdown</code>/<code className="font-mono">html</code>) the finished job&rsquo;s <code className="font-mono">rendered</code> field and webhook payload will include.</li>
               </ul>
               <h3 className="mb-2 mt-4 font-display text-sm font-medium text-ink">Optional fields</h3>
               <ul className="list-disc space-y-1.5 pl-5 font-body text-[14px] text-muted">
                 <li><code className="font-mono">webhook.url</code> / <code className="font-mono">webhook.events</code> — omit to poll GET /v1/jobs/{"{jobId}"} instead. When provided, both are required together.</li>
+                <li><code className="font-mono">idempotencyKey</code> — replaying the same key with the same body returns the original job instead of creating (and billing) a second one; reusing it with a different body is rejected with <code className="font-mono">VALIDATION_ERROR</code>.</li>
               </ul>
             </div>
 

@@ -21,6 +21,8 @@ const endpoints = [
   { method: "GET", path: "/v1/jobs/{jobId}", href: "/docs/api-reference/jobs-get", desc: "Poll a job's status and result." },
   { method: "GET", path: "/v1/usage", href: "/docs/api-reference/usage-get", desc: "Metered usage for the current billing period." },
   { method: "—", path: "Webhooks", href: "/docs/api-reference/webhooks", desc: "Payload schema and signature verification." },
+  { method: "—", path: "Examples", href: "/docs/examples", desc: "Batch/agency workflow, an async pipeline, and curl/JS/Python clients." },
+  { method: "—", path: "Versioning", href: "/docs/versioning", desc: "What's breaking, what isn't, and how /v2 would ship." },
 ] as const;
 
 export default function ApiReferenceIndexPage() {

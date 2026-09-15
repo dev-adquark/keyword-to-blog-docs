@@ -1,31 +1,39 @@
 import { z } from "zod";
 
-export const generateRequestSchema = z.object({
-  keywords: z.array(z.string().min(1)).min(1).max(20),
-  topic: z.string().min(1).max(200).optional(),
-  language: z.string().min(2).max(10),
-  region: z.string().max(10).optional(),
-  tone: z.enum(["professional", "friendly", "bold"]),
-  targetAudience: z.string().max(200).optional(),
-  brandVoice: z.string().max(200).optional(),
-  industry: z.string().max(100).optional(),
-  targetUrl: z.string().url().max(2048).optional(),
-  constraints: z.object({
-    maxWords: z.number().int().min(100).max(8000),
-    minWords: z.number().int().min(50).optional(),
-    maxSections: z.number().int().min(1).max(20).optional(),
-    includeFAQs: z.boolean().optional(),
-    includeInternalLinksPlaceholders: z.boolean().optional(),
-    keywordUsageStrategy: z.enum(["balanced", "natural"]).optional(),
-  }),
-  format: z.object({
-    responseTypes: z
-      .array(z.enum(["json", "markdown", "html"]))
-      .min(1),
-  }),
-  idempotencyKey: z.string().max(255).optional(),
-  clientProvidedRequestId: z.string().max(255).optional(),
-});
+export const generateRequestSchema = z
+  .object({
+    keywords: z.array(z.string().min(1)).min(1).max(20),
+    topic: z.string().min(1).max(200).optional(),
+    language: z.string().min(2).max(10),
+    region: z.string().max(10).optional(),
+    tone: z.enum(["professional", "friendly", "bold"]),
+    targetAudience: z.string().max(200).optional(),
+    brandVoice: z.string().max(200).optional(),
+    industry: z.string().max(100).optional(),
+    targetUrl: z.string().url().max(2048).optional(),
+    constraints: z.object({
+      maxWords: z.number().int().min(100).max(8000),
+      minWords: z.number().int().min(50).optional(),
+      maxSections: z.number().int().min(1).max(20).optional(),
+      includeFAQs: z.boolean().optional(),
+      includeInternalLinksPlaceholders: z.boolean().optional(),
+      keywordUsageStrategy: z.enum(["balanced", "natural"]).optional(),
+    }),
+    format: z.object({
+      responseTypes: z
+        .array(z.enum(["json", "markdown", "html"]))
+        .min(1),
+    }),
+    idempotencyKey: z.string().max(255).optional(),
+    clientProvidedRequestId: z.string().max(255).optional(),
+  })
+  .refine(
+    (data) => data.constraints.minWords === undefined || data.constraints.minWords <= data.constraints.maxWords,
+    {
+      message: "constraints.minWords must not exceed constraints.maxWords.",
+      path: ["constraints", "minWords"],
+    }
+  );
 
 export const jobsCreateRequestSchema = z.object({
   generateRequest: generateRequestSchema,

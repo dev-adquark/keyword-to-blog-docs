@@ -52,6 +52,7 @@ export default function UsageEndpointPage() {
                   <Tr><Td className="font-mono">consumed</Td><Td>Usage so far this period.</Td></Tr>
                   <Tr><Td className="font-mono">remaining</Td><Td>Limits minus consumed, for the metered units your plan tracks.</Td></Tr>
                   <Tr><Td className="font-mono">metering</Td><Td>Which unit (word/post) and granularity (request/generation) is billed.</Td></Tr>
+                  <Tr><Td className="font-mono">daily</Td><Td>Your per-API-key requests-per-day quota — the primary throughput lever on the Starter plan. Resets at UTC midnight.</Td></Tr>
                 </tbody>
               </Table>
             </div>

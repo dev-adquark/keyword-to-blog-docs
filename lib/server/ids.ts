@@ -13,3 +13,4 @@ export const newAccessRequestId = () => id("ar");
 export const newRequestId = () => id("req");
 export const newOtpId = () => id("otp");
 export const newSessionId = () => id("sess");
+export const newWebhookDeliveryId = () => id("whd");

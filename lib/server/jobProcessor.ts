@@ -1,48 +1,74 @@
 import "server-only";
 import {
   getJobById,
-  markJobProcessing,
+  claimJobForProcessing,
   markJobSucceeded,
   markJobFailed,
   recordUsageEvent,
+  createWebhookDeliveryRecord,
+  updateWebhookDeliveryRecord,
   type JobRow,
 } from "./repository";
 import { getAIProvider } from "./generation/anthropic";
 import { deliverWebhook } from "./webhooks";
 import { ApiError } from "./apiErrors";
+import {
+  renderMarkdown,
+  renderHtml,
+  countWords,
+  enforceSectionConstraint,
+  assertWordCountWithinTolerance,
+} from "./postRender";
+import type { WebhookSucceededPayloadV1, WebhookFailedPayloadV1 } from "@/lib/types";
 
-function renderMarkdown(post: {
-  outline: { h1: string };
-  sections: Array<{ heading?: string; contentMarkdown: string }>;
-  conclusion: string;
-}): string {
-  const parts = [`# ${post.outline.h1}`];
-  for (const s of post.sections) {
-    if (s.heading) parts.push(`## ${s.heading}`);
-    parts.push(s.contentMarkdown);
-  }
-  parts.push(post.conclusion);
-  return parts.join("\n\n");
+async function sendJobWebhook(
+  job: JobRow,
+  payload: WebhookSucceededPayloadV1 | WebhookFailedPayloadV1
+): Promise<void> {
+  if (!job.webhook_url || !job.webhook_secret) return;
+  if (!job.webhook_events.includes(payload.event)) return;
+
+  const record = await createWebhookDeliveryRecord({
+    jobId: job.id,
+    event: payload.event,
+    url: job.webhook_url,
+  });
+
+  const result = await deliverWebhook({
+    url: job.webhook_url,
+    secret: job.webhook_secret,
+    payload,
+  });
+
+  await updateWebhookDeliveryRecord(record.id, {
+    status: !result.attempted ? "blocked" : result.delivered ? "delivered" : "failed",
+    attempts: result.attempts,
+    lastStatusCode: result.lastStatusCode,
+    lastError: result.lastError,
+  });
 }
 
 export async function processJob(jobId: string): Promise<JobRow | null> {
-  const job = await getJobById(jobId);
-  if (!job || job.status !== "queued") return job;
+  // Atomic claim: if another invocation (e.g. a QStash redelivery racing
+  // this one) already claimed this job, `claimed` is null and we stop here
+  // instead of generating/billing a second time for the same job.
+  const claimed = await claimJobForProcessing(jobId);
+  if (!claimed) return getJobById(jobId);
 
-  await markJobProcessing(jobId);
+  const job = claimed;
   const started = Date.now();
 
   try {
     const provider = getAIProvider();
-    const post = await provider.generate(job.input);
-    const words = post.sections.reduce(
-      (sum, s) => sum + s.contentMarkdown.split(/\s+/).filter(Boolean).length,
-      0
-    );
+    const rawPost = await provider.generate(job.input);
+    const post = enforceSectionConstraint(rawPost, job.input.constraints);
+    const words = countWords(post);
+    assertWordCountWithinTolerance(words, job.input.constraints);
+
+    const responseTypes = job.input.format.responseTypes;
     const rendered = {
-      markdown: job.input.format.responseTypes.includes("markdown")
-        ? renderMarkdown(post)
-        : undefined,
+      ...(responseTypes.includes("markdown") ? { markdown: renderMarkdown(post) } : {}),
+      ...(responseTypes.includes("html") ? { html: renderHtml(post) } : {}),
     };
 
     await markJobSucceeded(jobId, post, rendered);
@@ -54,18 +80,18 @@ export async function processJob(jobId: string): Promise<JobRow | null> {
       statusCode: 200,
       success: true,
       words,
+      posts: 1,
       durationMs: Date.now() - started,
       countedTowardQuota: true,
     });
 
-    if (job.webhook_url && job.webhook_secret) {
-      await deliverWebhook({
-        url: job.webhook_url,
-        event: "job.succeeded",
-        secret: job.webhook_secret,
-        payload: { jobId, status: "succeeded", post },
-      });
-    }
+    await sendJobWebhook(job, {
+      event: "job.succeeded",
+      jobId,
+      requestId: job.request_id,
+      post,
+      rendered,
+    });
   } catch (err) {
     const code = err instanceof ApiError ? err.code : "INTERNAL_ERROR";
     const message =
@@ -79,18 +105,17 @@ export async function processJob(jobId: string): Promise<JobRow | null> {
       statusCode: 500,
       success: false,
       words: 0,
+      posts: 0,
       durationMs: Date.now() - started,
       countedTowardQuota: false,
     }).catch(() => {});
 
-    if (job.webhook_url && job.webhook_secret) {
-      await deliverWebhook({
-        url: job.webhook_url,
-        event: "job.failed",
-        secret: job.webhook_secret,
-        payload: { jobId, status: "failed", error: { code, message } },
-      });
-    }
+    await sendJobWebhook(job, {
+      event: "job.failed",
+      jobId,
+      requestId: job.request_id,
+      error: { code, message },
+    }).catch(() => {});
   }
 
   return getJobById(jobId);

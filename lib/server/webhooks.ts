@@ -6,6 +6,9 @@ import net from "node:net";
 export interface WebhookDeliveryResult {
   attempted: boolean;
   delivered: boolean;
+  attempts: number;
+  lastStatusCode?: number;
+  lastError?: string;
 }
 
 const BLOCKED_HOSTNAMES = new Set([
@@ -109,24 +112,28 @@ export async function verifyWebhookSignature(
  */
 export async function deliverWebhook(params: {
   url: string;
-  event: "job.succeeded" | "job.failed";
   secret: string;
-  payload: unknown;
+  /** The exact documented payload shape (WebhookSucceededPayloadV1 |
+   * WebhookFailedPayloadV1) — sent as-is, with no extra wrapper, so the
+   * wire format matches what the docs/types promise. */
+  payload: { event: "job.succeeded" | "job.failed" };
 }): Promise<WebhookDeliveryResult> {
   if (!(await validateWebhookUrl(params.url))) {
-    return { attempted: false, delivered: false };
+    return { attempted: false, delivered: false, attempts: 0, lastError: "blocked_url" };
   }
 
-  const body = JSON.stringify({ event: params.event, data: params.payload });
+  const body = JSON.stringify(params.payload);
   const timestamp = Math.floor(Date.now() / 1000).toString();
   const signature = createHmac("sha256", params.secret)
     .update(`${timestamp}.${body}`)
     .digest("hex");
 
-  let lastResponse: Response | null = null;
+  let lastError: string | undefined;
+  let lastStatusCode: number | undefined;
+
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      lastResponse = await fetch(params.url, {
+      const response = await fetch(params.url, {
         method: "POST",
         redirect: "manual",
         headers: {
@@ -136,19 +143,20 @@ export async function deliverWebhook(params: {
         body,
         signal: AbortSignal.timeout(10_000),
       });
+      lastStatusCode = response.status;
 
-      if (lastResponse.ok) {
-        return { attempted: true, delivered: true };
+      if (response.ok) {
+        return { attempted: true, delivered: true, attempts: attempt + 1, lastStatusCode };
       }
 
-      if (lastResponse.status !== 429 && lastResponse.status < 500) {
-        return { attempted: true, delivered: false };
+      if (response.status !== 429 && response.status < 500) {
+        return { attempted: true, delivered: false, attempts: attempt + 1, lastStatusCode };
       }
-    } catch {
+    } catch (err) {
+      lastError = err instanceof Error ? err.message : String(err);
       if (attempt === 2) {
-        return { attempted: true, delivered: false };
+        return { attempted: true, delivered: false, attempts: attempt + 1, lastError };
       }
-      continue;
     }
 
     if (attempt < 2) {
@@ -157,7 +165,7 @@ export async function deliverWebhook(params: {
     }
   }
 
-  return { attempted: true, delivered: false };
+  return { attempted: true, delivered: false, attempts: 3, lastStatusCode, lastError };
 }
 
 export function generateWebhookSecret(): string {

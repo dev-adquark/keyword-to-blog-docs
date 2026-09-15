@@ -77,7 +77,7 @@ export default function ErrorCodesPage() {
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Example: validation error</h2>
         <p className="mt-3 font-body text-[14px] text-muted">Request exceeded the plan&rsquo;s max words per request:</p>
-        <div className="mt-2"><JsonBlock data={errorValidationExample} filename="422" /></div>
+        <div className="mt-2"><JsonBlock data={errorValidationExample} filename="400" /></div>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Example: prohibited input</h2>
         <div className="mt-3"><JsonBlock data={errorProhibitedInputExample} filename="422" /></div>

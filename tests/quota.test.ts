@@ -53,7 +53,7 @@ describe("monthly quota enforcement", () => {
   it("blocks a request with QUOTA_EXCEEDED once the plan's monthly word cap is reached", async () => {
     const plan = getPlan("starter");
     mockActiveKeyAndCustomer("starter");
-    vi.mocked(getUsageSince).mockResolvedValue({ requests: 5, words: plan.monthlyWords });
+    vi.mocked(getUsageSince).mockResolvedValue({ requests: 5, words: plan.monthlyWords, posts: 5 });
 
     const result = await authenticate(
       new Request("https://example.com/api/v1/generate", {
@@ -72,7 +72,7 @@ describe("monthly quota enforcement", () => {
   it("blocks a request with QUOTA_EXCEEDED once the plan's monthly request cap is reached", async () => {
     const plan = getPlan("starter");
     mockActiveKeyAndCustomer("starter");
-    vi.mocked(getUsageSince).mockResolvedValue({ requests: plan.monthlyRequests, words: 100 });
+    vi.mocked(getUsageSince).mockResolvedValue({ requests: plan.monthlyRequests, words: 100, posts: plan.monthlyRequests });
 
     const result = await authenticate(
       new Request("https://example.com/api/v1/generate", {
@@ -88,7 +88,7 @@ describe("monthly quota enforcement", () => {
 
   it("allows the request through when usage is well under the monthly cap", async () => {
     mockActiveKeyAndCustomer("starter");
-    vi.mocked(getUsageSince).mockResolvedValue({ requests: 1, words: 10 });
+    vi.mocked(getUsageSince).mockResolvedValue({ requests: 1, words: 10, posts: 1 });
 
     const result = await authenticate(
       new Request("https://example.com/api/v1/generate", {

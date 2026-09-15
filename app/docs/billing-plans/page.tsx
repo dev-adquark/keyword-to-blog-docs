@@ -42,8 +42,11 @@ export default function BillingPlansPage() {
               </p>
               <ul className="mt-4 space-y-1.5 font-mono text-[12px] text-muted">
                 <li>{plan.requestsPerMinute} req/min</li>
+                <li>{plan.requestsPerDay.toLocaleString()} req/day per key</li>
                 <li>{plan.maxWordsPerRequest.toLocaleString()} words/request cap</li>
                 <li>{plan.monthlyWords.toLocaleString()} words/mo</li>
+                <li>{plan.monthlyRequests.toLocaleString()} requests/mo</li>
+                <li>{plan.maxConcurrentJobs} concurrent async job{plan.maxConcurrentJobs > 1 ? "s" : ""}</li>
                 <li>{plan.teamSeats} team seat{plan.teamSeats > 1 ? "s" : ""}</li>
               </ul>
             </div>
@@ -56,6 +59,8 @@ export default function BillingPlansPage() {
             <Tr>
               <Th>Plan</Th>
               <Th>Requests/min</Th>
+              <Th>Requests/day</Th>
+              <Th>Requests/mo</Th>
               <Th>Max words/request</Th>
               <Th>Monthly word cap</Th>
               <Th>Priority processing</Th>
@@ -66,6 +71,8 @@ export default function BillingPlansPage() {
               <Tr key={plan.id}>
                 <Td className="font-medium">{plan.name}</Td>
                 <Td className="font-mono">{plan.requestsPerMinute}</Td>
+                <Td className="font-mono">{plan.requestsPerDay.toLocaleString()}</Td>
+                <Td className="font-mono">{plan.monthlyRequests.toLocaleString()}</Td>
                 <Td className="font-mono">{plan.maxWordsPerRequest.toLocaleString()}</Td>
                 <Td className="font-mono">{plan.monthlyWords.toLocaleString()}</Td>
                 <Td>{plan.priorityProcessing ? "Yes" : "No"}</Td>
@@ -73,6 +80,13 @@ export default function BillingPlansPage() {
             ))}
           </tbody>
         </Table>
+        <p className="mt-3 font-body text-[13px] text-muted">
+          <code className="font-mono">requestsPerDay</code> is the primary Starter-plan control lever —
+          it, not the monthly cap, is usually what a free account hits first. Priority processing on
+          async jobs (<code className="font-mono">POST /v1/jobs</code>) is enforced via a dedicated
+          concurrency allowance per plan (see &ldquo;concurrent async jobs&rdquo; above): higher tiers can
+          have more of their jobs in flight at once rather than sharing one undifferentiated queue.
+        </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Quota exceeded response</h2>
         <p className="mt-3 font-body text-[15px] text-muted">

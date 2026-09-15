@@ -10,23 +10,17 @@ import {
 } from "@/lib/server/repository";
 import type { GenerateResponseV1 } from "@/lib/types";
 import { env } from "@/lib/server/env";
+import { readJsonBodyWithSizeLimit } from "@/lib/server/requestBody";
+import {
+  renderMarkdown,
+  renderHtml,
+  countWords,
+  enforceSectionConstraint,
+  assertWordCountWithinTolerance,
+} from "@/lib/server/postRender";
 import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
-
-function renderMarkdown(post: {
-  outline: { h1: string };
-  sections: Array<{ heading?: string; contentMarkdown: string }>;
-  conclusion: string;
-}): string {
-  const parts = [`# ${post.outline.h1}`];
-  for (const s of post.sections) {
-    if (s.heading) parts.push(`## ${s.heading}`);
-    parts.push(s.contentMarkdown);
-  }
-  parts.push(post.conclusion);
-  return parts.join("\n\n");
-}
 
 export async function POST(req: Request) {
   const auth = await authenticate(req, {
@@ -44,7 +38,7 @@ export async function POST(req: Request) {
   let claimedIdempotency = false;
 
   try {
-    const body = await req.json().catch(() => null);
+    const body = await readJsonBodyWithSizeLimit(req);
     if (!body) {
       throw new ApiError("VALIDATION_ERROR", "Request body must be valid JSON.");
     }
@@ -104,11 +98,10 @@ export async function POST(req: Request) {
     }
 
     const provider = getAIProvider();
-    const post = await provider.generate(generateRequest);
-    const words = post.sections.reduce(
-      (sum, s) => sum + s.contentMarkdown.split(/\s+/).filter(Boolean).length,
-      0
-    );
+    const rawPost = await provider.generate(generateRequest);
+    const post = enforceSectionConstraint(rawPost, generateRequest.constraints);
+    const words = countWords(post);
+    assertWordCountWithinTolerance(words, generateRequest.constraints);
 
     const responseBody: GenerateResponseV1 = {
       requestId,
@@ -116,6 +109,9 @@ export async function POST(req: Request) {
       rendered: {
         ...(generateRequest.format.responseTypes.includes("markdown")
           ? { markdown: renderMarkdown(post) }
+          : {}),
+        ...(generateRequest.format.responseTypes.includes("html")
+          ? { html: renderHtml(post) }
           : {}),
         ...(generateRequest.format.responseTypes.includes("json") ? { rawJson: post } : {}),
       },
@@ -130,6 +126,7 @@ export async function POST(req: Request) {
       statusCode: 200,
       success: true,
       words,
+      posts: 1,
       durationMs: Date.now() - started,
       countedTowardQuota: true,
     });
