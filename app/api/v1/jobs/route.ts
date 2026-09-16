@@ -33,6 +33,7 @@ function toJobV1(job: NonNullable<Awaited<ReturnType<typeof getJobById>>>): JobV
     },
     ...(job.result ? { result: job.result } : {}),
     ...(job.rendered ? { rendered: job.rendered } : {}),
+    ...(job.quality ? { quality: job.quality } : {}),
     ...(job.error_code
       ? {
           error: {

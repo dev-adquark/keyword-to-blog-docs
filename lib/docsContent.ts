@@ -29,6 +29,7 @@ export const docsNav: DocsNavSection[] = [
     items: [
       { label: "JSON schemas", href: "/docs/schemas" },
       { label: "SEO formatting guide", href: "/docs/seo-formatting-guide" },
+      { label: "Content quality pipeline", href: "/docs/content-quality" },
       { label: "Billing & plans", href: "/docs/billing-plans" },
       { label: "Error codes", href: "/docs/error-codes" },
     ],

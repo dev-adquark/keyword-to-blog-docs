@@ -12,6 +12,7 @@ const routes = [
   "/docs/api-reference/webhooks",
   "/docs/schemas",
   "/docs/seo-formatting-guide",
+  "/docs/content-quality",
   "/docs/billing-plans",
   "/docs/error-codes",
   "/docs/examples",

@@ -47,7 +47,8 @@ describe("POST /api/auth/forgot-password", () => {
       password_hash: "x",
       name: "Ada",
       status: "active",
-      email_verified_at: new Date().toISOString(),
+      role: "DEVELOPER",
+      last_login_at: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });
@@ -85,7 +86,8 @@ describe("POST /api/auth/forgot-password", () => {
       password_hash: "x",
       name: "Ada",
       status: "active",
-      email_verified_at: new Date().toISOString(),
+      role: "DEVELOPER",
+      last_login_at: null,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     });

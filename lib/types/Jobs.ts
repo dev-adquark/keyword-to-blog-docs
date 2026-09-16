@@ -1,5 +1,6 @@
 import { GenerateRequestV1, SEOPostV1 } from "./Generate";
 import { ErrorCode } from "./Error";
+import { ContentQualitySummary } from "./ContentQuality";
 
 export interface JobsCreateRequestV1 {
   generateRequest: GenerateRequestV1;
@@ -37,4 +38,6 @@ export interface JobV1 {
   };
   /** Present only in the POST /v1/jobs creation response, only when a webhook was configured — shown once, never retrievable again. */
   webhookSigningSecret?: string;
+  /** Present once the job succeeds — the content quality pipeline always runs. */
+  quality?: ContentQualitySummary;
 }

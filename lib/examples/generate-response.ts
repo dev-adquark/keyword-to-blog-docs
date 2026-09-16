@@ -97,4 +97,10 @@ export const generateResponseExample = {
   debug: {
     generationModel: "claude-haiku-4-5-20251001",
   },
+  quality: {
+    status: "pass",
+    score: 91,
+    revisionCount: 0,
+    qualityVersion: "1.0.0",
+  },
 } satisfies GenerateResponseV1;

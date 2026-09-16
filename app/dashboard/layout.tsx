@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { getCurrentSession } from "@/lib/server/auth";
 import { LogoutButton } from "@/components/LogoutButton";
 
 const NAV = [
@@ -8,12 +9,21 @@ const NAV = [
   { href: "/dashboard/access", label: "Plan & access" },
 ];
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+const OWNER_NAV = [
+  { href: "/dashboard/team", label: "Team" },
+  { href: "/dashboard/audit", label: "Audit log" },
+];
+
+export default async function DashboardLayout({ children }: { children: React.ReactNode }) {
+  const session = await getCurrentSession();
+  const isOwner = session?.user.role === "OWNER";
+  const nav = isOwner ? [...NAV, ...OWNER_NAV] : NAV;
+
   return (
     <div className="mx-auto grid max-w-6xl grid-cols-1 gap-8 px-6 py-10 md:grid-cols-[192px_1fr]">
       <aside className="md:w-48 md:shrink-0">
         <nav className="flex flex-row flex-wrap gap-1 md:flex-col">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <Link
               key={item.href}
               href={item.href}

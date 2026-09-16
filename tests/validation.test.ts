@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { generateRequestSchema, signupSchema, loginSchema } from "@/lib/server/validation";
+import { generateRequestSchema, loginSchema } from "@/lib/server/validation";
 
 describe("generateRequestSchema", () => {
   const valid = {
@@ -50,35 +50,6 @@ describe("generateRequestSchema", () => {
 
   it("accepts a request with no minWords at all", () => {
     expect(generateRequestSchema.safeParse(valid).success).toBe(true);
-  });
-});
-
-describe("signupSchema", () => {
-  it("rejects an invalid email", () => {
-    const result = signupSchema.safeParse({
-      name: "Ada",
-      email: "not-an-email",
-      password: "longenoughpassword",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("rejects a short password", () => {
-    const result = signupSchema.safeParse({
-      name: "Ada",
-      email: "ada@example.com",
-      password: "short",
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it("accepts valid signup data", () => {
-    const result = signupSchema.safeParse({
-      name: "Ada",
-      email: "ada@example.com",
-      password: "longenoughpassword",
-    });
-    expect(result.success).toBe(true);
   });
 });
 

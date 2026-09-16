@@ -29,6 +29,7 @@ export const jobGetSucceededResponseExample = {
   },
   result: generateResponseExample.post,
   rendered: generateResponseExample.rendered,
+  quality: generateResponseExample.quality,
 } satisfies JobV1;
 
 export const jobGetFailedResponseExample = {
@@ -55,6 +56,7 @@ export const webhookSuccessPayloadExample = {
   requestId: "req_9f3a1c2e4b",
   post: generateResponseExample.post,
   rendered: generateResponseExample.rendered,
+  quality: generateResponseExample.quality,
 } satisfies WebhookSucceededPayloadV1;
 
 export const webhookFailedPayloadExample = {

@@ -112,3 +112,16 @@ export const errorGenerationFailureExample = {
     requestId: "req_33221100dd",
   },
 } satisfies ErrorResponseV1;
+
+export const errorContentQualityFailedExample = {
+  error: {
+    code: "CONTENT_QUALITY_FAILED",
+    message: "Generated content did not meet the required quality standard after automatic revision.",
+    requestId: "req_77889900ee",
+    details: {
+      revisionCount: 2,
+      overallScore: 61,
+      failedCheckCodes: ["LOW_EXPERT_DEPTH", "KEYWORD_STUFFING"],
+    },
+  },
+} satisfies ErrorResponseV1;

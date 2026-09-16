@@ -72,12 +72,15 @@ describe("notifications", () => {
     const { notifyOwner } = await import("@/lib/server/notifications");
     await expect(
       notifyOwner({
-        type: "USER_SIGNED_UP",
+        type: "API_KEY_CREATED",
         userId: "usr_1",
         email: "a@example.com",
         name: "A",
         plan: "starter",
-        signedUpAt: new Date().toISOString(),
+        apiKeyId: "key_1",
+        keyPrefix: "ktb_live_abcd1234",
+        environment: "live",
+        createdAt: new Date().toISOString(),
       })
     ).resolves.toBeUndefined();
   });
@@ -87,12 +90,15 @@ describe("notifications", () => {
     const { notifyOwner } = await import("@/lib/server/notifications");
     await expect(
       notifyOwner({
-        type: "USER_SIGNED_UP",
+        type: "API_KEY_CREATED",
         userId: "usr_1",
         email: "a@example.com",
         name: "A",
         plan: "starter",
-        signedUpAt: new Date().toISOString(),
+        apiKeyId: "key_1",
+        keyPrefix: "ktb_live_abcd1234",
+        environment: "live",
+        createdAt: new Date().toISOString(),
       })
     ).resolves.toBeUndefined();
   });

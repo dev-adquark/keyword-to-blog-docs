@@ -6,13 +6,23 @@ vi.mock("@/lib/server/repository", () => ({
   markJobSucceeded: vi.fn(async () => undefined),
   markJobFailed: vi.fn(async () => undefined),
   recordUsageEvent: vi.fn(async () => undefined),
+  recordContentQualityReport: vi.fn(async () => undefined),
   createWebhookDeliveryRecord: vi.fn(async () => ({ id: "whd_1" })),
   updateWebhookDeliveryRecord: vi.fn(async () => undefined),
 }));
 
-vi.mock("@/lib/server/generation/anthropic", () => ({
-  getAIProvider: vi.fn(),
-}));
+// jobProcessor's job is to wire generation → quality pipeline → persistence →
+// webhooks correctly — NOT to re-verify quality-check behavior (that has its
+// own dedicated tests under tests/content-quality/). Mock the pipeline
+// itself so this file only exercises the wiring.
+vi.mock("@/lib/server/content-quality/engine", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/server/content-quality/engine")>();
+  return {
+    ContentQualityFailedError: actual.ContentQualityFailedError,
+    runContentQualityPipeline: vi.fn(),
+    toQualitySummary: vi.fn(() => ({ status: "pass", score: 90, revisionCount: 0, qualityVersion: "1.0.0" })),
+  };
+});
 
 vi.mock("@/lib/server/webhooks", () => ({
   deliverWebhook: vi.fn(async () => ({ attempted: true, delivered: true, attempts: 1, lastStatusCode: 200 })),
@@ -28,7 +38,7 @@ const {
   createWebhookDeliveryRecord,
   updateWebhookDeliveryRecord,
 } = await import("@/lib/server/repository");
-const { getAIProvider } = await import("@/lib/server/generation/anthropic");
+const { runContentQualityPipeline } = await import("@/lib/server/content-quality/engine");
 const { deliverWebhook } = await import("@/lib/server/webhooks");
 
 const validPost = {
@@ -38,6 +48,29 @@ const validPost = {
   outline: { h1: "H1", h2: ["a"] },
   sections: [{ type: "body", contentMarkdown: "some words here" }],
   conclusion: "the end",
+};
+
+const passingReport = {
+  qualityVersion: "1.0.0",
+  overallStatus: "PASS",
+  overallScore: 90,
+  writingScore: 90,
+  originalityScore: 90,
+  depthScore: 90,
+  seoScore: 90,
+  readabilityScore: 90,
+  keywordScore: 90,
+  structureScore: 90,
+  factualityStatus: "STANDARD_UNVERIFIED",
+  freshnessStatus: "NOT_APPLICABLE",
+  wordCount: 3,
+  keywordCoverage: 1,
+  revisionCount: 0,
+  passedChecks: [],
+  failedChecks: [],
+  warnings: [],
+  revisionReasons: [],
+  llmEvaluatorAvailable: false,
 };
 
 function baseJob(overrides: Partial<Record<string, unknown>> = {}) {
@@ -59,6 +92,7 @@ function baseJob(overrides: Partial<Record<string, unknown>> = {}) {
     webhook_secret: "secret",
     result: null,
     rendered: null,
+    quality: null,
     error_code: null,
     error_message: null,
     idempotency_key: null,
@@ -79,7 +113,7 @@ describe("processJob", () => {
 
     await processJob("job_1");
 
-    expect(getAIProvider).not.toHaveBeenCalled();
+    expect(runContentQualityPipeline).not.toHaveBeenCalled();
     expect(recordUsageEvent).not.toHaveBeenCalled();
   });
 
@@ -87,7 +121,7 @@ describe("processJob", () => {
     const job = baseJob();
     vi.mocked(claimJobForProcessing).mockResolvedValue(job as never);
     vi.mocked(getJobById).mockResolvedValue(job as never);
-    vi.mocked(getAIProvider).mockReturnValue({ generate: vi.fn(async () => validPost) } as never);
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({ post: validPost, report: passingReport } as never);
 
     await processJob("job_1");
 
@@ -119,11 +153,7 @@ describe("processJob", () => {
     const job = baseJob();
     vi.mocked(claimJobForProcessing).mockResolvedValue(job as never);
     vi.mocked(getJobById).mockResolvedValue(job as never);
-    vi.mocked(getAIProvider).mockReturnValue({
-      generate: vi.fn(async () => {
-        throw new Error("boom");
-      }),
-    } as never);
+    vi.mocked(runContentQualityPipeline).mockRejectedValue(new Error("boom"));
 
     await processJob("job_1");
 
@@ -147,7 +177,7 @@ describe("processJob", () => {
     const job = baseJob({ webhook_events: ["job.failed"] });
     vi.mocked(claimJobForProcessing).mockResolvedValue(job as never);
     vi.mocked(getJobById).mockResolvedValue(job as never);
-    vi.mocked(getAIProvider).mockReturnValue({ generate: vi.fn(async () => validPost) } as never);
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({ post: validPost, report: passingReport } as never);
 
     await processJob("job_1");
 
@@ -158,7 +188,7 @@ describe("processJob", () => {
     const job = baseJob({ webhook_url: null, webhook_secret: null });
     vi.mocked(claimJobForProcessing).mockResolvedValue(job as never);
     vi.mocked(getJobById).mockResolvedValue(job as never);
-    vi.mocked(getAIProvider).mockReturnValue({ generate: vi.fn(async () => validPost) } as never);
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({ post: validPost, report: passingReport } as never);
 
     await processJob("job_1");
 

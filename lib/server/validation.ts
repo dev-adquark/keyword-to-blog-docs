@@ -11,6 +11,7 @@ export const generateRequestSchema = z
     brandVoice: z.string().max(200).optional(),
     industry: z.string().max(100).optional(),
     targetUrl: z.string().url().max(2048).optional(),
+    factualityMode: z.enum(["standard", "verified"]).optional(),
     constraints: z.object({
       maxWords: z.number().int().min(100).max(8000),
       minWords: z.number().int().min(50).optional(),
@@ -49,14 +50,6 @@ export const jobsCreateRequestSchema = z.object({
   idempotencyKey: z.string().max(255).optional(),
 });
 
-export const signupSchema = z.object({
-  name: z.string().trim().min(1, "Name is required").max(200),
-  email: z.string().trim().email("Please provide a valid email address."),
-  password: z
-    .string()
-    .min(10, "Password must be at least 10 characters long."),
-});
-
 export const loginSchema = z.object({
   email: z.string().trim().email(),
   password: z.string().min(1),
@@ -64,15 +57,6 @@ export const loginSchema = z.object({
 
 const otpCodeSchema = z.string().trim().regex(/^\d{6}$/, "Enter the 6-digit code.");
 const emailSchema = z.string().trim().email("Please provide a valid email address.");
-
-export const verifyEmailSchema = z.object({
-  email: emailSchema,
-  otp: otpCodeSchema,
-});
-
-export const resendVerificationSchema = z.object({
-  email: emailSchema,
-});
 
 export const forgotPasswordSchema = z.object({
   email: emailSchema,
@@ -152,4 +136,16 @@ export const seoPostSchema = z.object({
 export const accessRequestSchema = z.object({
   requestedPlan: z.enum(["growth", "scale"]),
   reason: z.string().trim().max(1000).optional(),
+});
+
+/** Validates the LLM quality evaluator's own output before it's trusted for
+ * anything — never let the model just declare a bare "quality = 100". */
+export const llmEvaluationSchema = z.object({
+  usefulnessScore: z.number().min(0).max(100),
+  depthScore: z.number().min(0).max(100),
+  searchIntentMatchScore: z.number().min(0).max(100),
+  naturalWritingScore: z.number().min(0).max(100),
+  originalityOfIdeasScore: z.number().min(0).max(100),
+  factualPlausibilityScore: z.number().min(0).max(100),
+  concerns: z.array(z.string()).max(20).default([]),
 });

@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { loginSchema } from "@/lib/server/validation";
 import { verifyPassword } from "@/lib/server/password";
-import { findUserByEmail, createSession } from "@/lib/server/repository";
+import {
+  findUserByEmail,
+  createSession,
+  touchUserLastLogin,
+  recordAuditEvent,
+  isValidTeamRole,
+} from "@/lib/server/repository";
 import {
   SESSION_COOKIE,
   sessionCookieOptions,
@@ -32,6 +38,23 @@ function alertOnRepeatedLoginFailure(email: string): void {
       windowMinutes,
     });
   });
+}
+
+/** Records a login attempt in the OWNER-visible audit log — never blocks the request. */
+function auditLogin(params: {
+  outcome: "login_success" | "login_failed";
+  userId?: string | null;
+  email: string;
+  ip: string;
+}): void {
+  safeAfter(() =>
+    recordAuditEvent({
+      eventType: params.outcome,
+      targetUserId: params.userId ?? null,
+      metadata: { email: params.email },
+      ip: params.ip,
+    })
+  );
 }
 
 export async function POST(req: Request) {
@@ -66,27 +89,26 @@ export async function POST(req: Request) {
   }
 
   const user = await findUserByEmail(email);
-  if (!user || user.status !== "active") {
-    // Same response whether the email exists or not — avoids account enumeration.
+  if (
+    !user ||
+    user.status !== "active" ||
+    !user.password_hash ||
+    !isValidTeamRole(user.role)
+  ) {
+    // Same response whether the email doesn't exist, the account is
+    // disabled, has no password set, or isn't a recognized internal-team
+    // role — avoids account enumeration. There is no self-service signup:
+    // every account is admin-provisioned via scripts/provisionTeam.mjs.
     alertOnRepeatedLoginFailure(email);
+    auditLogin({ outcome: "login_failed", userId: user?.id, email, ip });
     return NextResponse.json(GENERIC_ERROR, { status: 401 });
   }
 
   const valid = await verifyPassword(password, user.password_hash);
   if (!valid) {
     alertOnRepeatedLoginFailure(email);
+    auditLogin({ outcome: "login_failed", userId: user.id, email, ip });
     return NextResponse.json(GENERIC_ERROR, { status: 401 });
-  }
-
-  if (!user.email_verified_at) {
-    return NextResponse.json(
-      {
-        code: "EMAIL_NOT_VERIFIED",
-        message: "Your email is not verified.",
-        email: user.email,
-      },
-      { status: 403 }
-    );
   }
 
   const rawToken = generateSessionToken();
@@ -95,6 +117,8 @@ export async function POST(req: Request) {
     tokenHash: hashSessionToken(rawToken),
     expiresAt: sessionExpiryDate(),
   });
+  safeAfter(() => touchUserLastLogin(user.id));
+  auditLogin({ outcome: "login_success", userId: user.id, email, ip });
 
   const res = NextResponse.json({ ok: true }, { status: 200 });
   res.cookies.set(SESSION_COOKIE, rawToken, sessionCookieOptions);

@@ -4,10 +4,19 @@ vi.mock("@/lib/server/password", () => ({
   verifyPassword: vi.fn(),
 }));
 
-vi.mock("@/lib/server/repository", () => ({
-  findUserByEmail: vi.fn(),
-  createSession: vi.fn(async () => ({ id: "sess_1" })),
-}));
+vi.mock("@/lib/server/repository", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/server/repository")>(
+    "@/lib/server/repository"
+  );
+  return {
+    TEAM_ROLES: actual.TEAM_ROLES,
+    isValidTeamRole: actual.isValidTeamRole,
+    findUserByEmail: vi.fn(),
+    createSession: vi.fn(async () => ({ id: "sess_1" })),
+    touchUserLastLogin: vi.fn(async () => undefined),
+    recordAuditEvent: vi.fn(async () => undefined),
+  };
+});
 
 vi.mock("@/lib/server/session", () => ({
   SESSION_COOKIE: "ktb_session",
@@ -28,7 +37,8 @@ vi.mock("@/lib/server/notifications", () => ({
 }));
 
 const { POST } = await import("@/app/api/auth/login/route");
-const { findUserByEmail, createSession } = await import("@/lib/server/repository");
+const { findUserByEmail, createSession, touchUserLastLogin, recordAuditEvent } =
+  await import("@/lib/server/repository");
 const { verifyPassword } = await import("@/lib/server/password");
 const { consumeFixedWindowLimit } = await import("@/lib/server/rateLimit");
 
@@ -47,7 +57,8 @@ function activeUser(overrides: Partial<Record<string, unknown>> = {}) {
     password_hash: "hash",
     name: "Ada",
     status: "active",
-    email_verified_at: new Date().toISOString(),
+    role: "DEVELOPER" as const,
+    last_login_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     ...overrides,
@@ -75,26 +86,33 @@ describe("login route", () => {
     expect(bodyNoUser).toEqual(bodyWrongPass);
   });
 
+  it("rejects an account with no password hash set, without calling verifyPassword", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue(activeUser({ password_hash: null }));
+    const res = await POST(loginRequest({ email: "ada@example.com", password: "whatever123" }));
+    const body = await res.json();
+
+    expect(res.status).toBe(401);
+    expect(body).toEqual({ code: "AUTH_INVALID", message: "Invalid email or password." });
+    expect(verifyPassword).not.toHaveBeenCalled();
+    expect(createSession).not.toHaveBeenCalled();
+  });
+
   it("rejects a disabled account the same way as a wrong password", async () => {
     vi.mocked(findUserByEmail).mockResolvedValue(activeUser({ status: "disabled" }));
     const res = await POST(loginRequest({ email: "ada@example.com", password: "correcthorsebattery" }));
     expect(res.status).toBe(401);
   });
 
-  it("blocks a correct password with EMAIL_NOT_VERIFIED when the account is unverified — no session created", async () => {
-    vi.mocked(findUserByEmail).mockResolvedValue(activeUser({ email_verified_at: null }));
-    vi.mocked(verifyPassword).mockResolvedValue(true);
-
+  it("rejects an account with no recognized team role, without calling verifyPassword", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue(
+      activeUser({ role: "SOMETHING_INVALID" as never })
+    );
     const res = await POST(loginRequest({ email: "ada@example.com", password: "correcthorsebattery" }));
-    const body = await res.json();
-
-    expect(res.status).toBe(403);
-    expect(body.code).toBe("EMAIL_NOT_VERIFIED");
-    expect(createSession).not.toHaveBeenCalled();
-    expect(res.headers.get("set-cookie")).toBeNull();
+    expect(res.status).toBe(401);
+    expect(verifyPassword).not.toHaveBeenCalled();
   });
 
-  it("logs a verified user in, creates a real session, and sets a session cookie with no Max-Age", async () => {
+  it("logs a valid user in, creates a real session, sets a session cookie with no Max-Age, updates last_login_at, and audit-logs success", async () => {
     vi.mocked(findUserByEmail).mockResolvedValue(activeUser());
     vi.mocked(verifyPassword).mockResolvedValue(true);
 
@@ -108,6 +126,21 @@ describe("login route", () => {
     // A true browser-session cookie: no Max-Age/Expires attribute at all.
     expect(setCookie?.toLowerCase()).not.toContain("max-age");
     expect(setCookie?.toLowerCase()).not.toContain("expires");
+
+    expect(touchUserLastLogin).toHaveBeenCalledWith("user_1");
+    expect(recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "login_success", targetUserId: "user_1" })
+    );
+  });
+
+  it("audit-logs a failed login attempt", async () => {
+    vi.mocked(findUserByEmail).mockResolvedValue(activeUser());
+    vi.mocked(verifyPassword).mockResolvedValue(false);
+
+    await POST(loginRequest({ email: "ada@example.com", password: "wrongpassword" }));
+    expect(recordAuditEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ eventType: "login_failed", targetUserId: "user_1" })
+    );
   });
 
   it("rejects malformed request bodies without crashing", async () => {

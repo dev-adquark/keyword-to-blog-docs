@@ -2,11 +2,13 @@ import "server-only";
 import { env } from "./env";
 
 /**
- * Transactional auth emails (OTP delivery) via Resend — distinct from
- * lib/server/notifications.ts, which is owner-only alerting. These are
- * user-facing and functionally required (the OTP has no other delivery
- * channel), so a failure here is logged loudly, but the calling route still
- * decides whether to fail the request; this module never fabricates success.
+ * Transactional auth email (password-reset OTP delivery) via Resend —
+ * distinct from lib/server/notifications.ts, which is owner-only alerting.
+ * This is user-facing and functionally required (the OTP has no other
+ * delivery channel), so a failure here is logged loudly, but the calling
+ * route still decides whether to fail the request; this module never
+ * fabricates success. There is no sign-up/email-verification flow — this app
+ * is internal-team-only and admin-provisioned.
  */
 
 async function sendEmail(params: {
@@ -53,25 +55,6 @@ async function sendEmail(params: {
     );
     return { ok: false };
   }
-}
-
-export async function sendVerificationEmail(params: {
-  to: string;
-  otp: string;
-}): Promise<{ ok: boolean }> {
-  return sendEmail({
-    to: params.to,
-    subject: "Verify your email — Keyword-to-Blog API",
-    text: [
-      "Welcome to Keyword-to-Blog API.",
-      "",
-      `Your verification code is: ${params.otp}`,
-      "",
-      "This code expires in 10 minutes and can only be used once.",
-      "",
-      "If you didn't create this account, you can safely ignore this email.",
-    ].join("\n"),
-  });
 }
 
 export async function sendPasswordResetEmail(params: {

@@ -14,3 +14,5 @@ export const newRequestId = () => id("req");
 export const newOtpId = () => id("otp");
 export const newSessionId = () => id("sess");
 export const newWebhookDeliveryId = () => id("whd");
+export const newAuditEventId = () => id("aud");
+export const newQualityReportId = () => id("qr");

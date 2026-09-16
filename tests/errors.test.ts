@@ -11,6 +11,7 @@ describe("errorResponse", () => {
     ["VALIDATION_ERROR", 400],
     ["PROHIBITED_INPUT", 422],
     ["JOB_NOT_FOUND", 404],
+    ["CONTENT_QUALITY_FAILED", 422],
     ["INTERNAL_ERROR", 500],
   ] as const)("maps %s to HTTP %i", (code, status) => {
     const res = errorResponse(new ApiError(code, "message"), "req_test");

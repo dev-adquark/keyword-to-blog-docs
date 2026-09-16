@@ -3,7 +3,7 @@ import { randomInt, createHmac, timingSafeEqual } from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { env } from "./env";
 
-export type OtpPurpose = "email_verification" | "password_reset";
+export type OtpPurpose = "password_reset";
 
 export const OTP_TTL_MINUTES = 10;
 export const OTP_MAX_ATTEMPTS = 5;

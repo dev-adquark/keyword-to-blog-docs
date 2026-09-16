@@ -1,8 +1,6 @@
 import "server-only";
 import { query, queryOne, withClient } from "./db";
 import {
-  newUserId,
-  newCustomerId,
   newApiKeyId,
   newUsageId,
   newJobId,
@@ -10,18 +8,33 @@ import {
   newOtpId,
   newSessionId,
   newWebhookDeliveryId,
+  newAuditEventId,
+  newQualityReportId,
 } from "./ids";
 import type { OtpPurpose } from "./otp";
-import { DEFAULT_PLAN_ID } from "@/lib/plans";
-import type { GenerateRequestV1, SEOPostV1 } from "@/lib/types";
+import type { ContentQualityReport, ContentQualitySummary, GenerateRequestV1, SEOPostV1 } from "@/lib/types";
+
+export type TeamRole = "OWNER" | "DEVELOPER" | "DIGITAL_MARKETING" | "ACCOUNT_MANAGEMENT";
+
+export const TEAM_ROLES: readonly TeamRole[] = [
+  "OWNER",
+  "DEVELOPER",
+  "DIGITAL_MARKETING",
+  "ACCOUNT_MANAGEMENT",
+];
+
+export function isValidTeamRole(value: string): value is TeamRole {
+  return (TEAM_ROLES as readonly string[]).includes(value);
+}
 
 export interface UserRow {
   id: string;
   email: string;
-  password_hash: string;
+  password_hash: string | null;
   name: string;
   status: string;
-  email_verified_at: string | null;
+  role: TeamRole;
+  last_login_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -82,6 +95,7 @@ export interface JobRow {
   webhook_secret: string | null;
   result: SEOPostV1 | null;
   rendered: { markdown?: string; html?: string } | null;
+  quality: ContentQualitySummary | null;
   error_code: string | null;
   error_message: string | null;
   idempotency_key: string | null;
@@ -90,51 +104,6 @@ export interface JobRow {
 }
 
 // ---------- Users / Customers ----------
-
-export async function createUserAndCustomer(params: {
-  name: string;
-  email: string;
-  passwordHash: string;
-}): Promise<{ user: UserRow; customer: CustomerRow }> {
-  const userId = newUserId();
-  const customerId = newCustomerId();
-
-  return withClient(async (client) => {
-    await client.query("BEGIN");
-    try {
-      console.info("signup_db_debug", { step: "user_insert_start" });
-      const user = await client.query<UserRow>(
-        `INSERT INTO users (id, email, password_hash, name) VALUES ($1, $2, $3, $4) RETURNING *`,
-        [userId, params.email.toLowerCase(), params.passwordHash, params.name]
-      );
-      console.info("signup_db_debug", { step: "user_insert_done", userId: user.rows[0]?.id });
-
-      console.info("signup_db_debug", { step: "customer_insert_start", userId });
-      const customer = await client.query<CustomerRow>(
-        `INSERT INTO customers (id, user_id, plan) VALUES ($1, $2, $3) RETURNING *`,
-        [customerId, userId, DEFAULT_PLAN_ID]
-      );
-      console.info("signup_db_debug", { step: "customer_insert_done", customerId: customer.rows[0]?.id });
-
-      await client.query("COMMIT");
-      console.info("signup_db_debug", { step: "transaction_commit" });
-
-      const createdUser = user.rows[0];
-      const createdCustomer = customer.rows[0];
-      if (!createdUser || !createdCustomer) {
-        throw new Error("Failed to create account");
-      }
-      return { user: createdUser, customer: createdCustomer };
-    } catch (err) {
-      await client.query("ROLLBACK");
-      console.error("signup_db_debug", {
-        step: "transaction_rollback",
-        error: err instanceof Error ? err.message : String(err),
-      });
-      throw err;
-    }
-  });
-}
 
 export async function findUserByEmail(email: string): Promise<UserRow | null> {
   return queryOne<UserRow>(`SELECT * FROM users WHERE email = $1`, [
@@ -170,13 +139,6 @@ export async function updateCustomerPlan(
   );
 }
 
-export async function markUserEmailVerified(userId: string): Promise<void> {
-  await query(
-    `UPDATE users SET email_verified_at = now(), updated_at = now() WHERE id = $1`,
-    [userId]
-  );
-}
-
 export async function updateUserPassword(
   userId: string,
   passwordHash: string
@@ -184,6 +146,228 @@ export async function updateUserPassword(
   await query(
     `UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1`,
     [userId, passwordHash]
+  );
+}
+
+export async function touchUserLastLogin(userId: string): Promise<void> {
+  await query(`UPDATE users SET last_login_at = now() WHERE id = $1`, [userId]);
+}
+
+/** OWNER-only: enable/disable a team member's account. Historical usage data is untouched. */
+export async function updateUserStatus(
+  userId: string,
+  status: "active" | "disabled"
+): Promise<UserRow | null> {
+  return queryOne<UserRow>(
+    `UPDATE users SET status = $2, updated_at = now() WHERE id = $1 RETURNING *`,
+    [userId, status]
+  );
+}
+
+/** All team members with their linked customer — the base row set for the OWNER team dashboard. */
+export async function listUsersWithCustomers(): Promise<
+  Array<UserRow & { customer_id: string | null }>
+> {
+  return query<UserRow & { customer_id: string | null }>(
+    `SELECT u.*, c.id AS customer_id
+     FROM users u
+     LEFT JOIN customers c ON c.user_id = u.id
+     ORDER BY u.created_at ASC`
+  );
+}
+
+export async function findUserWithCustomerById(
+  userId: string
+): Promise<(UserRow & { customer_id: string | null }) | null> {
+  return queryOne<UserRow & { customer_id: string | null }>(
+    `SELECT u.*, c.id AS customer_id
+     FROM users u
+     LEFT JOIN customers c ON c.user_id = u.id
+     WHERE u.id = $1`,
+    [userId]
+  );
+}
+
+/** Every API key across the team, with its owning user — for the OWNER dashboard only. */
+export async function listApiKeysWithOwners(): Promise<
+  Array<ApiKeyRow & { user_id: string; user_email: string; user_name: string }>
+> {
+  return query<ApiKeyRow & { user_id: string; user_email: string; user_name: string }>(
+    `SELECT ak.*, u.id AS user_id, u.email AS user_email, u.name AS user_name
+     FROM api_keys ak
+     JOIN customers c ON c.id = ak.customer_id
+     JOIN users u ON u.id = c.user_id
+     ORDER BY ak.created_at DESC`
+  );
+}
+
+export async function findApiKeyWithOwnerById(
+  id: string
+): Promise<
+  (ApiKeyRow & { user_id: string; user_email: string; user_name: string }) | null
+> {
+  return queryOne<ApiKeyRow & { user_id: string; user_email: string; user_name: string }>(
+    `SELECT ak.*, u.id AS user_id, u.email AS user_email, u.name AS user_name
+     FROM api_keys ak
+     JOIN customers c ON c.id = ak.customer_id
+     JOIN users u ON u.id = c.user_id
+     WHERE ak.id = $1`,
+    [id]
+  );
+}
+
+/** OWNER-only revoke — unlike revokeApiKey(id, customerId), this isn't restricted to one customer. */
+export async function revokeApiKeyAsOwner(id: string): Promise<boolean> {
+  const rows = await query(
+    `UPDATE api_keys SET status = 'revoked', revoked_at = now()
+     WHERE id = $1 AND status = 'active' RETURNING id`,
+    [id]
+  );
+  return rows.length > 0;
+}
+
+export async function getUsageSinceForApiKey(
+  apiKeyId: string,
+  since: Date
+): Promise<{ requests: number; words: number; posts: number; failed: number; rateLimited: number }> {
+  const row = await queryOne<{
+    requests: string;
+    words: string;
+    posts: string;
+    failed: string;
+    rate_limited: string;
+  }>(
+    `SELECT COUNT(*) FILTER (WHERE counted_toward_quota) AS requests,
+            COALESCE(SUM(words) FILTER (WHERE counted_toward_quota), 0) AS words,
+            COALESCE(SUM(posts) FILTER (WHERE counted_toward_quota), 0) AS posts,
+            COUNT(*) FILTER (WHERE NOT success) AS failed,
+            COUNT(*) FILTER (WHERE status_code = 429) AS rate_limited
+     FROM usage_events WHERE api_key_id = $1 AND created_at >= $2`,
+    [apiKeyId, since.toISOString()]
+  );
+  return {
+    requests: Number(row?.requests ?? 0),
+    words: Number(row?.words ?? 0),
+    posts: Number(row?.posts ?? 0),
+    failed: Number(row?.failed ?? 0),
+    rateLimited: Number(row?.rate_limited ?? 0),
+  };
+}
+
+export interface UsageEventRow {
+  id: string;
+  api_key_id: string;
+  customer_id: string;
+  endpoint: string;
+  request_id: string;
+  status_code: number;
+  success: boolean;
+  words: number;
+  posts: number;
+  duration_ms: number;
+  counted_toward_quota: boolean;
+  created_at: string;
+}
+
+export async function listRecentUsageEventsForApiKey(
+  apiKeyId: string,
+  limit: number
+): Promise<UsageEventRow[]> {
+  return query<UsageEventRow>(
+    `SELECT * FROM usage_events WHERE api_key_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [apiKeyId, limit]
+  );
+}
+
+/** Team-wide recent request activity, across every user's keys — OWNER dashboard only. */
+export async function listRecentUsageEventsForTeam(
+  limit: number
+): Promise<Array<UsageEventRow & { user_id: string; user_email: string; key_prefix: string }>> {
+  return query<UsageEventRow & { user_id: string; user_email: string; key_prefix: string }>(
+    `SELECT ue.*, u.id AS user_id, u.email AS user_email, ak.key_prefix
+     FROM usage_events ue
+     JOIN api_keys ak ON ak.id = ue.api_key_id
+     JOIN customers c ON c.id = ue.customer_id
+     JOIN users u ON u.id = c.user_id
+     ORDER BY ue.created_at DESC
+     LIMIT $1`,
+    [limit]
+  );
+}
+
+export async function getJobCountsByStatus(
+  customerId: string
+): Promise<{ queued: number; processing: number; succeeded: number; failed: number }> {
+  const rows = await query<{ status: string; n: string }>(
+    `SELECT status, COUNT(*) AS n FROM jobs WHERE customer_id = $1 GROUP BY status`,
+    [customerId]
+  );
+  const counts = { queued: 0, processing: 0, succeeded: 0, failed: 0 };
+  for (const row of rows) {
+    if (row.status in counts) counts[row.status as keyof typeof counts] = Number(row.n);
+  }
+  return counts;
+}
+
+// ---------- Audit log (auth/admin security events — distinct from usage_events) ----------
+
+export interface AuditEventRow {
+  id: string;
+  event_type: string;
+  actor_user_id: string | null;
+  target_user_id: string | null;
+  target_api_key_id: string | null;
+  metadata: Record<string, unknown> | null;
+  ip: string | null;
+  created_at: string;
+}
+
+export async function recordAuditEvent(params: {
+  eventType: string;
+  actorUserId?: string | null;
+  targetUserId?: string | null;
+  targetApiKeyId?: string | null;
+  metadata?: Record<string, unknown>;
+  ip?: string | null;
+}): Promise<void> {
+  await query(
+    `INSERT INTO audit_events (id, event_type, actor_user_id, target_user_id, target_api_key_id, metadata, ip)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+    [
+      newAuditEventId(),
+      params.eventType,
+      params.actorUserId ?? null,
+      params.targetUserId ?? null,
+      params.targetApiKeyId ?? null,
+      params.metadata ? JSON.stringify(params.metadata) : null,
+      params.ip ?? null,
+    ]
+  );
+}
+
+export async function listRecentAuditEvents(
+  limit: number
+): Promise<
+  Array<
+    AuditEventRow & {
+      actor_email: string | null;
+      target_user_email: string | null;
+      target_api_key_prefix: string | null;
+    }
+  >
+> {
+  return query(
+    `SELECT ae.*,
+            actor.email AS actor_email,
+            target.email AS target_user_email,
+            ak.key_prefix AS target_api_key_prefix
+     FROM audit_events ae
+     LEFT JOIN users actor ON actor.id = ae.actor_user_id
+     LEFT JOIN users target ON target.id = ae.target_user_id
+     LEFT JOIN api_keys ak ON ak.id = ae.target_api_key_id
+     ORDER BY ae.created_at DESC
+     LIMIT $1`,
+    [limit]
   );
 }
 
@@ -462,11 +646,12 @@ export async function claimJobForProcessing(id: string): Promise<JobRow | null> 
 export async function markJobSucceeded(
   id: string,
   result: SEOPostV1,
-  rendered: { markdown?: string; html?: string }
+  rendered: { markdown?: string; html?: string },
+  quality: ContentQualitySummary
 ): Promise<void> {
   await query(
-    `UPDATE jobs SET status = 'succeeded', result = $2, rendered = $3, updated_at = now() WHERE id = $1`,
-    [id, JSON.stringify(result), JSON.stringify(rendered)]
+    `UPDATE jobs SET status = 'succeeded', result = $2, rendered = $3, quality = $4, updated_at = now() WHERE id = $1`,
+    [id, JSON.stringify(result), JSON.stringify(rendered), JSON.stringify(quality)]
   );
 }
 
@@ -634,4 +819,49 @@ export async function saveIdempotencyRecord(params: {
   statusCode: number;
 }): Promise<void> {
   await updateIdempotencyRecord(params);
+}
+
+// ---------- Content quality reports ----------
+
+/** Persists quality-pipeline metadata/scores only — never the generated
+ * content itself (already stored on the job/usage event). Best-effort: a
+ * failure here must never fail the request it's reporting on. */
+export async function recordContentQualityReport(params: {
+  requestId: string;
+  jobId?: string | null;
+  customerId: string;
+  apiKeyId?: string | null;
+  overallStatus: "PASS" | "FAIL";
+  report: ContentQualityReport;
+}): Promise<void> {
+  await query(
+    `INSERT INTO content_quality_reports
+      (id, request_id, job_id, customer_id, api_key_id, quality_version, overall_status,
+       overall_score, writing_score, originality_score, depth_score, seo_score,
+       readability_score, keyword_score, structure_score, factuality_status,
+       freshness_status, revision_count, failed_checks, warnings)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)`,
+    [
+      newQualityReportId(),
+      params.requestId,
+      params.jobId ?? null,
+      params.customerId,
+      params.apiKeyId ?? null,
+      params.report.qualityVersion,
+      params.overallStatus,
+      params.report.overallScore,
+      params.report.writingScore,
+      params.report.originalityScore,
+      params.report.depthScore,
+      params.report.seoScore,
+      params.report.readabilityScore,
+      params.report.keywordScore,
+      params.report.structureScore,
+      params.report.factualityStatus,
+      params.report.freshnessStatus,
+      params.report.revisionCount,
+      JSON.stringify(params.report.failedChecks),
+      JSON.stringify(params.report.warnings),
+    ]
+  );
 }

@@ -6,6 +6,7 @@ import {
   touchSession,
   findUserById,
   findCustomerByUserId,
+  isValidTeamRole,
   type UserRow,
   type CustomerRow,
 } from "./repository";
@@ -25,7 +26,7 @@ export async function getCurrentSession(): Promise<CurrentSession | null> {
   if (!session) return null;
 
   const user = await findUserById(session.user_id);
-  if (!user || user.status !== "active") return null;
+  if (!user || user.status !== "active" || !isValidTeamRole(user.role)) return null;
 
   const customer = await findCustomerByUserId(user.id);
   if (!customer) return null;

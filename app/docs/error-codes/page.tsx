@@ -11,6 +11,7 @@ import {
   errorValidationExample,
   errorProhibitedInputExample,
   errorGenerationFailureExample,
+  errorContentQualityFailedExample,
 } from "@/lib/examples/usage-and-errors";
 
 export const metadata: Metadata = {
@@ -34,6 +35,12 @@ const codes = [
   { code: "PROHIBITED_INPUT", status: 422, meaning: "Input matched a prohibited-content filter and was rejected." },
   { code: "JOB_NOT_FOUND", status: 404, meaning: "No job exists with the given jobId for this account." },
   { code: "JOB_FAILED", status: 200, meaning: "The job record itself reports status: failed (not an HTTP error)." },
+  {
+    code: "CONTENT_QUALITY_FAILED",
+    status: 422,
+    meaning:
+      "Every generation is validated and, if needed, automatically revised by the content quality pipeline before being returned. This means the pipeline could not produce content clearing the quality bar within the configured revision limit.",
+  },
   { code: "INTERNAL_ERROR", status: 500, meaning: "An unexpected server error occurred." },
 ] as const;
 
@@ -84,6 +91,14 @@ export default function ErrorCodesPage() {
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Example: generation failure</h2>
         <div className="mt-3"><JsonBlock data={errorGenerationFailureExample} filename="500" /></div>
+
+        <h2 className="mt-10 font-display text-xl font-medium text-ink">Example: content quality failed</h2>
+        <p className="mt-3 font-body text-[14px] text-muted">
+          <code className="font-mono">details.failedCheckCodes</code> lists which internal quality checks were still
+          failing when the revision limit was reached — see{" "}
+          <a href="/docs/seo-formatting-guide" className="text-indigo hover:underline">the content quality pipeline</a>.
+        </p>
+        <div className="mt-2"><JsonBlock data={errorContentQualityFailedExample} filename="422" /></div>
       </div>
     </DocsPageShell>
   );

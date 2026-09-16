@@ -28,14 +28,6 @@ export function safeAfter(fn: () => Promise<void>): void {
 
 export type NotificationEvent =
   | {
-      type: "USER_SIGNED_UP";
-      userId: string;
-      email: string;
-      name: string;
-      plan: string;
-      signedUpAt: string;
-    }
-  | {
       type: "API_KEY_CREATED";
       userId: string;
       email: string;
@@ -84,17 +76,6 @@ export type NotificationEvent =
 
 function renderEmail(event: NotificationEvent): { subject: string; text: string } {
   switch (event.type) {
-    case "USER_SIGNED_UP":
-      return {
-        subject: "New Keyword-to-Blog API user signup",
-        text: [
-          `Name: ${event.name}`,
-          `Email: ${event.email}`,
-          `User ID: ${event.userId}`,
-          `Plan: ${event.plan}`,
-          `Signed up at: ${event.signedUpAt}`,
-        ].join("\n"),
-      };
     case "API_KEY_CREATED":
       return {
         subject: "Keyword-to-Blog API key created",

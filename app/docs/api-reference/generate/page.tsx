@@ -63,11 +63,24 @@ export default function GenerateEndpointPage() {
                   <Tr><Td className="font-mono">tone</Td><Td className="font-mono">{`"professional" | "friendly" | "bold"`}</Td><Td>Must match one of the supported enum values.</Td></Tr>
                   <Tr><Td className="font-mono">constraints.maxWords</Td><Td className="font-mono">number</Td><Td>Capped by your plan&rsquo;s maxWordsPerRequest — see billing & plans.</Td></Tr>
                   <Tr><Td className="font-mono">format.responseTypes</Td><Td className="font-mono">{`Array<"json"|"markdown"|"html">`}</Td><Td>Controls which representations appear under rendered.</Td></Tr>
+                  <Tr><Td className="font-mono">factualityMode</Td><Td className="font-mono">{`"standard" | "verified"`}</Td><Td>Optional, defaults to <code className="font-mono">&quot;standard&quot;</code> — see the <a href="/docs/content-quality" className="text-indigo hover:underline">content quality pipeline</a>.</Td></Tr>
                 </tbody>
               </Table>
               <p className="mt-2 font-body text-[13px] text-muted">
                 Full field list: see <code className="font-mono">GenerateRequestV1</code> in{" "}
                 <code className="font-mono">lib/types/Generate.ts</code>.
+              </p>
+            </div>
+
+            <div>
+              <h3 className="mb-2 font-display text-sm font-medium text-ink">Content quality pipeline</h3>
+              <p className="font-body text-[14px] text-muted">
+                The response is never the model&rsquo;s raw first draft — every generation is validated and,
+                if needed, automatically revised by the{" "}
+                <a href="/docs/content-quality" className="text-indigo hover:underline">content quality pipeline</a>{" "}
+                before being returned. If it still can&rsquo;t pass within the revision limit, the request fails
+                with <code className="font-mono">CONTENT_QUALITY_FAILED</code> instead of returning substandard
+                content.
               </p>
             </div>
 
@@ -97,8 +110,12 @@ export default function GenerateEndpointPage() {
               <p className="font-body text-[14px] text-muted">
                 <code className="font-mono">requestId</code>, <code className="font-mono">post</code> (the{" "}
                 <code className="font-mono">SEOPostV1</code> object), <code className="font-mono">rendered</code>{" "}
-                (markdown/html/rawJson per requested <code className="font-mono">format.responseTypes</code>), and
-                an optional <code className="font-mono">debug</code> block.
+                (markdown/html/rawJson per requested <code className="font-mono">format.responseTypes</code>), an
+                optional <code className="font-mono">debug</code> block, and{" "}
+                <code className="font-mono">quality</code> — a minimal summary from the{" "}
+                <a href="/docs/content-quality" className="text-indigo hover:underline">content quality pipeline</a>{" "}
+                (score, revision count); the full internal scoring breakdown is intentionally not part of the
+                public response.
               </p>
             </div>
 

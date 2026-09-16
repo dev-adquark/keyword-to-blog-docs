@@ -2,22 +2,17 @@ import { NextResponse } from "next/server";
 import { authenticate } from "@/lib/server/withApiAuth";
 import { generateRequestSchema } from "@/lib/server/validation";
 import { ApiError, errorResponse, internalErrorResponse, statusForError } from "@/lib/server/apiErrors";
-import { getAIProvider } from "@/lib/server/generation/anthropic";
+import { runContentQualityPipeline, ContentQualityFailedError, toQualitySummary } from "@/lib/server/content-quality/engine";
 import {
   recordUsageEvent,
+  recordContentQualityReport,
   claimIdempotencyRequest,
   updateIdempotencyRecord,
 } from "@/lib/server/repository";
 import type { GenerateResponseV1 } from "@/lib/types";
 import { env } from "@/lib/server/env";
 import { readJsonBodyWithSizeLimit } from "@/lib/server/requestBody";
-import {
-  renderMarkdown,
-  renderHtml,
-  countWords,
-  enforceSectionConstraint,
-  assertWordCountWithinTolerance,
-} from "@/lib/server/postRender";
+import { renderMarkdown, renderHtml, countWords } from "@/lib/server/postRender";
 import { createHash } from "node:crypto";
 
 export const runtime = "nodejs";
@@ -97,11 +92,16 @@ export async function POST(req: Request) {
       }
     }
 
-    const provider = getAIProvider();
-    const rawPost = await provider.generate(generateRequest);
-    const post = enforceSectionConstraint(rawPost, generateRequest.constraints);
+    const { post, report } = await runContentQualityPipeline(generateRequest);
     const words = countWords(post);
-    assertWordCountWithinTolerance(words, generateRequest.constraints);
+
+    recordContentQualityReport({
+      requestId,
+      customerId: customer.id,
+      apiKeyId: apiKey.id,
+      overallStatus: "PASS",
+      report,
+    }).catch(() => {});
 
     const responseBody: GenerateResponseV1 = {
       requestId,
@@ -116,6 +116,7 @@ export async function POST(req: Request) {
         ...(generateRequest.format.responseTypes.includes("json") ? { rawJson: post } : {}),
       },
       debug: { generationModel: env.AI_MODEL },
+      quality: toQualitySummary(report),
     };
 
     await recordUsageEvent({
@@ -157,6 +158,16 @@ export async function POST(req: Request) {
       durationMs: Date.now() - started,
       countedTowardQuota: false,
     }).catch(() => {});
+
+    if (err instanceof ContentQualityFailedError) {
+      recordContentQualityReport({
+        requestId,
+        customerId: customer.id,
+        apiKeyId: apiKey.id,
+        overallStatus: "FAIL",
+        report: err.report,
+      }).catch(() => {});
+    }
 
     if (idempotencyKey && claimedIdempotency && generateRequest) {
       await updateIdempotencyRecord({

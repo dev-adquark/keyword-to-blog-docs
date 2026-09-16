@@ -3,18 +3,27 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+-- Internal, admin-provisioned accounts only — see scripts/provisionTeam.mjs.
+-- There is no public signup and no email-verification flow.
 CREATE TABLE IF NOT EXISTS users (
   id                 TEXT PRIMARY KEY,
   email              TEXT NOT NULL UNIQUE,
-  password_hash      TEXT NOT NULL,
+  password_hash      TEXT, -- set by scripts/provisionTeam.mjs; app never inserts a NULL
   name               TEXT NOT NULL,
   status             TEXT NOT NULL DEFAULT 'active', -- active | disabled
-  email_verified_at  TIMESTAMPTZ, -- NULL until the signup OTP is verified
+  role               TEXT NOT NULL DEFAULT 'DEVELOPER', -- OWNER | DEVELOPER | DIGITAL_MARKETING | ACCOUNT_MANAGEMENT
+  last_login_at      TIMESTAMPTZ,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT now()
 );
--- Existing installs: adds the column without recreating the table.
-ALTER TABLE users ADD COLUMN IF NOT EXISTS email_verified_at TIMESTAMPTZ;
+-- Existing installs: adds/adjusts columns without recreating the table.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'DEVELOPER';
+ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ;
+-- This app is now internal/admin-provisioned only (no public signup, no
+-- Firebase, no email verification) — columns from that earlier phase are no
+-- longer referenced anywhere in the app, so they're dropped here.
+ALTER TABLE users DROP COLUMN IF EXISTS email_verified_at;
+ALTER TABLE users DROP COLUMN IF EXISTS firebase_uid;
 
 CREATE TABLE IF NOT EXISTS customers (
   id          TEXT PRIMARY KEY,
@@ -59,6 +68,9 @@ CREATE TABLE IF NOT EXISTS usage_events (
 ALTER TABLE usage_events ADD COLUMN IF NOT EXISTS posts INT NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_usage_api_key_created ON usage_events(api_key_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_usage_customer_created ON usage_events(customer_id, created_at);
+-- Supports the OWNER team-wide "today's activity" dashboard query, which scans
+-- across all customers rather than one at a time.
+CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at);
 
 CREATE TABLE IF NOT EXISTS jobs (
   id             TEXT PRIMARY KEY,
@@ -72,6 +84,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   webhook_secret TEXT,
   result         JSONB,
   rendered       JSONB,
+  quality        JSONB, -- ContentQualitySummary — same object also stored in content_quality_reports (full detail)
   error_code     TEXT,
   error_message  TEXT,
   idempotency_key TEXT,
@@ -80,6 +93,7 @@ CREATE TABLE IF NOT EXISTS jobs (
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_customer_created ON jobs(customer_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_api_key_idempotency ON jobs(api_key_id, idempotency_key);
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS quality JSONB;
 
 CREATE TABLE IF NOT EXISTS idempotency_records (
   api_key_id    TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
@@ -91,12 +105,13 @@ CREATE TABLE IF NOT EXISTS idempotency_records (
   PRIMARY KEY (api_key_id, idempotency_key)
 );
 
--- One-time codes for both signup email verification and password reset,
--- distinguished by `purpose`. Only a hash of the code is ever stored.
+-- One-time codes for password reset. Only a hash of the code is ever stored.
+-- `purpose` is kept (rather than assumed) for forward compatibility, though
+-- 'password_reset' is the only value in use now that signup/verification is gone.
 CREATE TABLE IF NOT EXISTS otps (
   id           TEXT PRIMARY KEY,
   user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  purpose      TEXT NOT NULL, -- email_verification | password_reset
+  purpose      TEXT NOT NULL, -- password_reset
   otp_hash     TEXT NOT NULL,
   expires_at   TIMESTAMPTZ NOT NULL,
   attempts     INT NOT NULL DEFAULT 0,
@@ -147,3 +162,49 @@ CREATE TABLE IF NOT EXISTS access_requests (
   reviewer_id      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_access_requests_customer ON access_requests(customer_id);
+
+-- Auth/admin audit trail — distinct from usage_events (which meters API
+-- requests): this tracks account-level security events for the OWNER audit
+-- log (logins, and admin actions like disabling a user or revoking a key).
+CREATE TABLE IF NOT EXISTS audit_events (
+  id                 TEXT PRIMARY KEY,
+  event_type         TEXT NOT NULL, -- login_success | login_failed | user_status_changed | api_key_revoked
+  actor_user_id      TEXT REFERENCES users(id) ON DELETE SET NULL,
+  target_user_id     TEXT REFERENCES users(id) ON DELETE SET NULL,
+  target_api_key_id  TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
+  metadata           JSONB,
+  ip                 TEXT,
+  created_at         TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_events_created ON audit_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_actor ON audit_events(actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_events_target_user ON audit_events(target_user_id);
+
+-- Content-quality pipeline reports — metadata/scores only, never the
+-- generated content itself (jobs.result / usage_events already store what's
+-- needed about the generation; this table is purely for quality observability).
+CREATE TABLE IF NOT EXISTS content_quality_reports (
+  id                TEXT PRIMARY KEY,
+  request_id        TEXT NOT NULL,
+  job_id            TEXT REFERENCES jobs(id) ON DELETE SET NULL,
+  customer_id       TEXT NOT NULL REFERENCES customers(id) ON DELETE CASCADE,
+  api_key_id        TEXT REFERENCES api_keys(id) ON DELETE SET NULL,
+  quality_version   TEXT NOT NULL,
+  overall_status    TEXT NOT NULL, -- PASS | FAIL
+  overall_score     INT NOT NULL,
+  writing_score     INT NOT NULL,
+  originality_score INT NOT NULL,
+  depth_score       INT NOT NULL,
+  seo_score         INT NOT NULL,
+  readability_score INT NOT NULL,
+  keyword_score     INT NOT NULL,
+  structure_score   INT NOT NULL,
+  factuality_status TEXT NOT NULL,
+  freshness_status  TEXT NOT NULL,
+  revision_count    INT NOT NULL DEFAULT 0,
+  failed_checks     JSONB NOT NULL DEFAULT '[]',
+  warnings          JSONB NOT NULL DEFAULT '[]',
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_quality_reports_customer_created ON content_quality_reports(customer_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_quality_reports_job ON content_quality_reports(job_id);

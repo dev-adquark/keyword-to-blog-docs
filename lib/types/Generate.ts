@@ -1,3 +1,5 @@
+import type { ContentQualitySummary } from "./ContentQuality";
+
 export interface GenerateRequestV1 {
   keywords: string[]; // at least 1
   topic?: string;
@@ -8,6 +10,16 @@ export interface GenerateRequestV1 {
   brandVoice?: string;
   industry?: string;
   targetUrl?: string;
+  /**
+   * Optional — defaults to "standard" when omitted (fully backward
+   * compatible with existing requests). "standard" content is generated from
+   * model knowledge with no claim of external verification. "verified"
+   * requires source-backed verification of factual claims; since this
+   * deployment has no source-retrieval capability, "verified" requests
+   * currently fail the quality gate with CONTENT_QUALITY_FAILED rather than
+   * fabricating verification — see lib/server/content-quality/factuality.ts.
+   */
+  factualityMode?: "standard" | "verified";
   constraints: {
     maxWords: number;
     minWords?: number;
@@ -60,4 +72,7 @@ export interface GenerateResponseV1 {
   debug?: {
     generationModel?: string;
   };
+  /** Present on every successful response — the content quality pipeline
+   * always runs; see lib/server/content-quality/. */
+  quality?: ContentQualitySummary;
 }

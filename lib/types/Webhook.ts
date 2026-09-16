@@ -1,5 +1,6 @@
 import { SEOPostV1 } from "./Generate";
 import { ErrorCode } from "./Error";
+import { ContentQualitySummary } from "./ContentQuality";
 
 export interface WebhookSucceededPayloadV1 {
   event: "job.succeeded";
@@ -10,6 +11,7 @@ export interface WebhookSucceededPayloadV1 {
     markdown?: string;
     html?: string;
   };
+  quality?: ContentQualitySummary;
 }
 
 export interface WebhookFailedPayloadV1 {

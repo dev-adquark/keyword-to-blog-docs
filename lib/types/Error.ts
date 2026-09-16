@@ -8,6 +8,7 @@ export type ErrorCode =
   | "PROHIBITED_INPUT"
   | "JOB_NOT_FOUND"
   | "JOB_FAILED"
+  | "CONTENT_QUALITY_FAILED"
   | "INTERNAL_ERROR";
 
 export interface ErrorResponseV1 {

@@ -35,7 +35,8 @@ function existingUser() {
     password_hash: "x",
     name: "Ada",
     status: "active",
-    email_verified_at: new Date().toISOString(),
+    role: "DEVELOPER" as const,
+    last_login_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

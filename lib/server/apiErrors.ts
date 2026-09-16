@@ -11,6 +11,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   PROHIBITED_INPUT: 422,
   JOB_NOT_FOUND: 404,
   JOB_FAILED: 200, // job resource itself is returned with 200; error lives in job.error
+  CONTENT_QUALITY_FAILED: 422,
   INTERNAL_ERROR: 500,
 };
 

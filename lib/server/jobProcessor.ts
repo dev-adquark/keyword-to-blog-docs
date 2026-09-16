@@ -5,20 +5,15 @@ import {
   markJobSucceeded,
   markJobFailed,
   recordUsageEvent,
+  recordContentQualityReport,
   createWebhookDeliveryRecord,
   updateWebhookDeliveryRecord,
   type JobRow,
 } from "./repository";
-import { getAIProvider } from "./generation/anthropic";
+import { runContentQualityPipeline, ContentQualityFailedError, toQualitySummary } from "./content-quality/engine";
 import { deliverWebhook } from "./webhooks";
 import { ApiError } from "./apiErrors";
-import {
-  renderMarkdown,
-  renderHtml,
-  countWords,
-  enforceSectionConstraint,
-  assertWordCountWithinTolerance,
-} from "./postRender";
+import { renderMarkdown, renderHtml, countWords } from "./postRender";
 import type { WebhookSucceededPayloadV1, WebhookFailedPayloadV1 } from "@/lib/types";
 
 async function sendJobWebhook(
@@ -59,11 +54,17 @@ export async function processJob(jobId: string): Promise<JobRow | null> {
   const started = Date.now();
 
   try {
-    const provider = getAIProvider();
-    const rawPost = await provider.generate(job.input);
-    const post = enforceSectionConstraint(rawPost, job.input.constraints);
+    const { post, report } = await runContentQualityPipeline(job.input);
     const words = countWords(post);
-    assertWordCountWithinTolerance(words, job.input.constraints);
+
+    recordContentQualityReport({
+      requestId: job.request_id,
+      jobId,
+      customerId: job.customer_id,
+      apiKeyId: job.api_key_id,
+      overallStatus: "PASS",
+      report,
+    }).catch(() => {});
 
     const responseTypes = job.input.format.responseTypes;
     const rendered = {
@@ -71,7 +72,7 @@ export async function processJob(jobId: string): Promise<JobRow | null> {
       ...(responseTypes.includes("html") ? { html: renderHtml(post) } : {}),
     };
 
-    await markJobSucceeded(jobId, post, rendered);
+    await markJobSucceeded(jobId, post, rendered, toQualitySummary(report));
     await recordUsageEvent({
       apiKeyId: job.api_key_id,
       customerId: job.customer_id,
@@ -91,11 +92,24 @@ export async function processJob(jobId: string): Promise<JobRow | null> {
       requestId: job.request_id,
       post,
       rendered,
+      quality: toQualitySummary(report),
     });
   } catch (err) {
     const code = err instanceof ApiError ? err.code : "INTERNAL_ERROR";
     const message =
       err instanceof ApiError ? err.message : "Content generation failed.";
+
+    if (err instanceof ContentQualityFailedError) {
+      recordContentQualityReport({
+        requestId: job.request_id,
+        jobId,
+        customerId: job.customer_id,
+        apiKeyId: job.api_key_id,
+        overallStatus: "FAIL",
+        report: err.report,
+      }).catch(() => {});
+    }
+
     await markJobFailed(jobId, code, message);
     await recordUsageEvent({
       apiKeyId: job.api_key_id,

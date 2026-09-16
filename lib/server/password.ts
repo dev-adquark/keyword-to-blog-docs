@@ -13,8 +13,3 @@ export async function verifyPassword(
 ): Promise<boolean> {
   return bcrypt.compare(plain, hash);
 }
-
-/** Minimum password policy, enforced server-side regardless of client validation. */
-export function passwordMeetsPolicy(plain: string): boolean {
-  return typeof plain === "string" && plain.length >= 10;
-}

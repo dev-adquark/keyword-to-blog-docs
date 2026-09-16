@@ -41,6 +41,7 @@ export async function GET(
       },
       ...(job.result ? { result: job.result } : {}),
       ...(job.rendered ? { rendered: job.rendered } : {}),
+      ...(job.quality ? { quality: job.quality } : {}),
       ...(job.error_code
         ? {
             error: {
