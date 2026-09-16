@@ -138,6 +138,35 @@ describe("runContentQualityPipeline (integration)", () => {
     }
   });
 
+  it("an unsupported/fabricated evidence claim triggers the repair call, and the softened patch passes", async () => {
+    const base = goodPost();
+    const withFabricatedClaim = {
+      ...base,
+      sections: [
+        base.sections[0]!,
+        {
+          ...base.sections[1]!,
+          contentMarkdown:
+            "Professionals who allocate 15-20 focused minutes daily to a single task consistently outpace those who multitask throughout the day.",
+        },
+        ...base.sections.slice(2),
+      ],
+    };
+    const provider = fakeProvider({
+      generate: vi.fn(async () => withFabricatedClaim),
+      repair: vi.fn(async (): Promise<RepairPatch> => ({
+        sections: [{ index: 1, contentMarkdown: base.sections[1]!.contentMarkdown }],
+      })),
+    });
+
+    const { report } = await runContentQualityPipeline(baseRequest(), provider);
+
+    expect(report.overallStatus).toBe("PASS");
+    expect(provider.repair).toHaveBeenCalledTimes(1);
+    const repairArgs = vi.mocked(provider.repair).mock.calls[0]?.[0];
+    expect(repairArgs?.failedChecks.some((f) => f.code === "UNSUPPORTED_EVIDENCE_CLAIM")).toBe(true);
+  });
+
   it("never lets factualityMode: 'verified' pass, and never spends the repair call trying to fix it", async () => {
     const provider = fakeProvider({ generate: vi.fn(async () => goodPost()) });
 

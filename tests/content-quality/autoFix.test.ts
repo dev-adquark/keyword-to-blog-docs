@@ -77,6 +77,38 @@ describe("applyDeterministicFixes", () => {
     expect(new Set(result.post.outline.h2).size).toBe(result.post.outline.h2.length);
   });
 
+  it("fixes DUPLICATE_CONCLUSION by removing the redundant conclusion-type section and keeping the more substantial text as the canonical conclusion", () => {
+    const post = goodPost({
+      conclusion: "Short.",
+      sections: [
+        ...goodPost().sections,
+        {
+          type: "conclusion",
+          heading: "Wrapping Up",
+          contentMarkdown: "A much longer and more substantial closing section with real content in it.",
+        },
+      ],
+    });
+    const result = applyDeterministicFixes(post, [check("DUPLICATE_CONCLUSION", { severity: "warning" })], baseBrief());
+
+    expect(result.appliedFixes).toContain("DUPLICATE_CONCLUSION");
+    expect(result.post.sections.some((s) => s.type === "conclusion")).toBe(false);
+    // The longer, more substantial text was promoted to the canonical field.
+    expect(result.post.conclusion).toBe("A much longer and more substantial closing section with real content in it.");
+  });
+
+  it("never loses the original conclusion text when it's already the more substantial one", () => {
+    const original = goodPost().conclusion;
+    const post = goodPost({
+      sections: [
+        ...goodPost().sections,
+        { type: "conclusion", heading: "Wrapping Up", contentMarkdown: "Short section text." },
+      ],
+    });
+    const result = applyDeterministicFixes(post, [check("DUPLICATE_CONCLUSION", { severity: "warning" })], baseBrief());
+    expect(result.post.conclusion).toBe(original);
+  });
+
   it("removes weak FAQ entries (duplicate question, non-question, thin answer) rather than trying to rewrite them", () => {
     const post = goodPost({
       faqs: [

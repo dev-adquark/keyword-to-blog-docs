@@ -11,6 +11,7 @@ import type { StructureResult } from "./structure";
 import type { SpamDetectionResult } from "./spamDetection";
 import type { FactualityResult } from "./factuality";
 import type { FreshnessResult } from "./freshness";
+import type { EvidenceClaimsResult } from "./evidenceClaims";
 
 export interface ValidatorOutputs {
   writing: WritingQualityResult;
@@ -23,6 +24,10 @@ export interface ValidatorOutputs {
   spam: SpamDetectionResult;
   factuality: FactualityResult;
   freshness: FreshnessResult;
+  /** Fabricated/unsupported-precision claims — folded into the writing
+   * score since asserting unverifiable specifics is a writing-integrity
+   * concern, not a separate report category (see evidenceClaims.ts). */
+  evidence: EvidenceClaimsResult;
 }
 
 /** Builds a report without deciding pass/fail — see qualityGate.ts for that.
@@ -38,7 +43,7 @@ export function buildQualityReport(params: {
 }): Omit<ContentQualityReport, "overallStatus"> {
   const { outputs } = params;
 
-  const writingScore = outputs.writing.score;
+  const writingScore = Math.round((outputs.writing.score + outputs.evidence.score) / 2);
   const originalityScore = outputs.originality.score;
   const depthScore = outputs.depth.score;
   const seoScore = Math.round((outputs.seo.score + outputs.spam.score) / 2);
@@ -51,6 +56,7 @@ export function buildQualityReport(params: {
 
   const allFailedChecks: FailedCheck[] = [
     ...outputs.writing.failedChecks,
+    ...outputs.evidence.failedChecks,
     ...outputs.originality.failedChecks,
     ...outputs.depth.failedChecks,
     ...outputs.seo.failedChecks,
@@ -64,6 +70,7 @@ export function buildQualityReport(params: {
 
   const warnings: string[] = [
     ...outputs.writing.warnings,
+    ...outputs.evidence.warnings,
     ...outputs.originality.warnings,
     ...outputs.depth.warnings,
     ...outputs.seo.warnings,
@@ -76,7 +83,7 @@ export function buildQualityReport(params: {
   ];
 
   const categories: Array<{ name: string; failedChecks: FailedCheck[] }> = [
-    { name: "writing", failedChecks: outputs.writing.failedChecks },
+    { name: "writing", failedChecks: [...outputs.writing.failedChecks, ...outputs.evidence.failedChecks] },
     { name: "originality", failedChecks: outputs.originality.failedChecks },
     { name: "depth", failedChecks: outputs.depth.failedChecks },
     { name: "seo", failedChecks: [...outputs.seo.failedChecks, ...outputs.spam.failedChecks] },

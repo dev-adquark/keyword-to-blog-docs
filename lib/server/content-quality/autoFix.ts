@@ -114,6 +114,29 @@ function fixStructure(post: SEOPostV1): SEOPostV1 {
   return { ...post, sections, outline: { ...post.outline, h2 } };
 }
 
+/**
+ * Fixes the duplicate-conclusion bug at the source: `post.conclusion` is the
+ * single canonical closing text, so any `type: "conclusion"` section is
+ * redundant. Never just discards real content — if a conclusion-type
+ * section's prose is more substantial than the current `post.conclusion`,
+ * it's promoted to become the new canonical conclusion; either way, the
+ * redundant section itself is removed from `sections[]`.
+ */
+function dedupeConclusion(post: SEOPostV1): SEOPostV1 {
+  const conclusionTexts = post.sections
+    .filter((s) => s.type === "conclusion")
+    .map((s) => s.contentMarkdown)
+    .filter((text): text is string => Boolean(text && text.trim().length > 0));
+
+  if (conclusionTexts.length === 0) return post;
+
+  const longest = [...conclusionTexts].sort((a, b) => b.length - a.length)[0]!;
+  const conclusion = longest.length > post.conclusion.length ? longest : post.conclusion;
+  const sections = post.sections.filter((s) => s.type !== "conclusion");
+
+  return { ...post, conclusion, sections };
+}
+
 /** Drops FAQ entries that fail basic quality bars (duplicate question, not
  * phrased as a question, or an answer too thin to be useful) — removing bad
  * content is a safe mechanical fix; rewriting it is not. */
@@ -160,6 +183,7 @@ const FIXERS: Record<string, Fixer> = {
   }),
   DUPLICATE_HEADING: dedupeSectionHeadings,
   STRUCTURE_INVALID: fixStructure,
+  DUPLICATE_CONCLUSION: dedupeConclusion,
   WEAK_FAQS: removeWeakFaqs,
   KEYWORD_STUFFED_HEADING: fixKeywordStuffedHeadings,
 };

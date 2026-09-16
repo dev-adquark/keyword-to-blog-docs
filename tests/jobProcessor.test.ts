@@ -172,6 +172,34 @@ describe("processJob", () => {
     );
   });
 
+  it("REGRESSION (async path): rendered markdown never contains the conclusion twice, even when the pipeline returns a redundant conclusion-type section", async () => {
+    const job = baseJob();
+    const postWithRedundantConclusionSection = {
+      ...validPost,
+      sections: [
+        ...validPost.sections,
+        { type: "conclusion", heading: "Wrapping Up", contentMarkdown: "A separate section-level closing statement." },
+      ],
+      conclusion: "The canonical closing statement.",
+    };
+    vi.mocked(claimJobForProcessing).mockResolvedValue(job as never);
+    vi.mocked(getJobById).mockResolvedValue(job as never);
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({
+      post: postWithRedundantConclusionSection,
+      report: passingReport,
+    } as never);
+
+    await processJob("job_1");
+
+    const webhookCall = vi.mocked(deliverWebhook).mock.calls[0]?.[0] as unknown as {
+      payload: { rendered: { markdown: string } };
+    };
+    const markdown = webhookCall.payload.rendered.markdown;
+    expect(markdown).toContain("The canonical closing statement.");
+    expect(markdown).not.toContain("A separate section-level closing statement.");
+    expect(markdown.split("The canonical closing statement.").length - 1).toBe(1);
+  });
+
   it("does not send a webhook for an event the customer didn't subscribe to", async () => {
     const job = baseJob({ webhook_events: ["job.failed"] });
     vi.mocked(claimJobForProcessing).mockResolvedValue(job as never);

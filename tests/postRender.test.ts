@@ -78,6 +78,47 @@ describe("assertWordCountWithinTolerance", () => {
   });
 });
 
+describe("duplicate conclusion bug", () => {
+  it("renderMarkdown never renders a conclusion-type section's own content — post.conclusion is the sole canonical closer", () => {
+    const post = makePost({
+      sections: [
+        { type: "body", heading: "Body", contentMarkdown: "Body content here." },
+        { type: "conclusion", heading: "Wrapping Up", contentMarkdown: "This is the section's own closing text." },
+      ],
+      conclusion: "This is the canonical conclusion field.",
+    });
+    const md = renderMarkdown(post);
+
+    expect(md).toContain("This is the canonical conclusion field.");
+    expect(md).not.toContain("This is the section's own closing text.");
+    expect(md).not.toContain("Wrapping Up");
+    // Appears exactly once, not duplicated.
+    const occurrences = md.split("This is the canonical conclusion field.").length - 1;
+    expect(occurrences).toBe(1);
+  });
+
+  it("renderHtml never renders a conclusion-type section's own content either", () => {
+    const post = makePost({
+      sections: [
+        { type: "conclusion", heading: "Wrapping Up", contentMarkdown: "Section-level closing text." },
+      ],
+      conclusion: "Canonical conclusion text.",
+    });
+    const html = renderHtml(post);
+
+    expect(html).toContain("Canonical conclusion text.");
+    expect(html).not.toContain("Section-level closing text.");
+    expect(html).not.toContain("Wrapping Up");
+    expect(html.split("Canonical conclusion text.").length - 1).toBe(1);
+  });
+
+  it("still renders the conclusion exactly once when there is no separate conclusion-type section at all", () => {
+    const post = makePost({ conclusion: "Only conclusion source." });
+    const md = renderMarkdown(post);
+    expect(md.split("Only conclusion source.").length - 1).toBe(1);
+  });
+});
+
 describe("renderMarkdown", () => {
   it("includes h1, section headings, callouts, faqs, and conclusion", () => {
     const post = makePost({

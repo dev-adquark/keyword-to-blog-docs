@@ -36,12 +36,25 @@ export function evaluateStructure(post: SEOPostV1): StructureResult {
     });
   }
 
+  // `post.conclusion` is the single canonical closing field (required by
+  // schema); a `type: "conclusion"` section existing alongside it with real
+  // content is redundant by construction — the renderer already refuses to
+  // render it (see postRender.ts), but the JSON itself should be cleaned up
+  // too so the post object stays internally consistent (see autoFix.ts).
   const conclusionSections = post.sections.filter((s) => s.type === "conclusion");
   if (conclusionSections.length > 1) {
     failed.push({
       code: "STRUCTURE_INVALID",
       severity: "warning",
       message: `The article has ${conclusionSections.length} conclusion-type sections in addition to the required "conclusion" field.`,
+    });
+  }
+  if (conclusionSections.some((s) => s.contentMarkdown && s.contentMarkdown.trim().length > 0)) {
+    failed.push({
+      code: "DUPLICATE_CONCLUSION",
+      severity: "warning",
+      message:
+        'A "conclusion"-type section has its own content in addition to the required top-level "conclusion" field — this is redundant and must not be rendered twice.',
     });
   }
 

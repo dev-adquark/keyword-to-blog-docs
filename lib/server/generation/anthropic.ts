@@ -52,7 +52,7 @@ Respond with ONLY a JSON object matching exactly this TypeScript shape:
   "coverageNotes"?: { "keywordCoverage": Array<{ "keyword": string, "covered": boolean, "evidence": string }> }
 }
 
-Writing quality requirements: avoid generic openings ("in today's digital world", "in an increasingly..."), avoid generic closings ("in conclusion", "by following these tips"), avoid filler phrases ("it is important to note"), avoid restating the same point in different words, avoid keyword stuffing, and give concrete, specific guidance (numbers, examples, named specifics) rather than vague claims. Never fabricate facts, sources, citations, statistics, or quotes.`;
+Writing quality requirements: avoid generic openings ("in today's digital world", "in an increasingly..."), avoid generic closings ("in conclusion", "by following these tips"), avoid filler phrases ("it is important to note"), avoid restating the same point in different words, avoid keyword stuffing, and give concrete, specific guidance (real mechanisms, tradeoffs, and examples) rather than vague claims. Do not open more than one section with the same shallow "The [thing] is/lies/transforms..." construction — vary how each section starts. Do not repeat the same corporate buzzword (e.g. "seamless", "robust", "leverage") more than once or twice across the whole article. Never fabricate facts, sources, citations, statistics, or quotes, and never present a claim as independently verified, backed by "studies" or "experts", or as a precise guaranteed outcome (e.g. a specific percentage or a "consistently outperforms" claim) unless it is genuinely common, uncontroversial knowledge — when in doubt, phrase it as a general, hedged observation instead.`;
 
 function buildPrompt(req: GenerateRequestV1, context?: GenerationContext): string {
   return `Keywords: ${req.keywords.join(", ")}
@@ -82,6 +82,14 @@ Return ONLY a MINIMAL JSON PATCH containing the fields/sections you actually cha
 
 Rules:
 - Fix ONLY the identified problems you're given. Do not change anything that was not flagged.
+- Actually rewrite the affected text — do not just reformat, reorder, or trivially reword it. A generic
+  introduction must become a concrete, topic-specific one; a shallow section must gain real explanation,
+  examples, or mechanisms; repetitive/templated phrasing must be varied; unnatural keyword usage must be
+  rewritten naturally rather than just deleting the keyword.
+- If a flagged problem is an unsupported or fabricated claim (an invented statistic, a "studies show"/"experts
+  agree"/"proven strategies" style claim with no real source, or a suspiciously precise outcome like "15-20
+  minutes... consistently outperform"), REMOVE the fabricated specifics or SOFTEN the claim into an honest,
+  general observation. Never invent a different fake number or source to replace it.
 - Do not fabricate facts, sources, citations, statistics, or quotes.
 - Do not fabricate URLs.
 - Keep the same language, tone, and overall length as the original.

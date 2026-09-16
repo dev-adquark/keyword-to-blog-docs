@@ -88,6 +88,11 @@ function paragraphsToHtml(text: string): string {
 export function renderMarkdown(post: SEOPostV1): string {
   const parts = [`# ${post.outline.h1}`];
   for (const s of post.sections) {
+    // `post.conclusion` is the single canonical closing text — a
+    // `type: "conclusion"` section exists for structural/heading purposes
+    // only. Rendering both here is exactly the duplicate-conclusion bug:
+    // never render a conclusion-type section's own prose inline.
+    if (s.type === "conclusion") continue;
     if (s.heading) parts.push(`## ${s.heading}`);
     if (s.contentMarkdown) parts.push(s.contentMarkdown);
     if (s.callout) parts.push(`> **${s.callout.label}:** ${s.callout.text}`);
@@ -105,6 +110,10 @@ export function renderMarkdown(post: SEOPostV1): string {
 export function renderHtml(post: SEOPostV1): string {
   const parts = [`<h1>${escapeHtml(post.outline.h1)}</h1>`];
   for (const s of post.sections) {
+    // See renderMarkdown's comment — `post.conclusion` is the sole
+    // canonical closing text; never also render a conclusion-type section's
+    // own content inline, or the conclusion appears twice.
+    if (s.type === "conclusion") continue;
     if (s.heading) parts.push(`<h2>${escapeHtml(s.heading)}</h2>`);
     if (s.contentMarkdown) parts.push(paragraphsToHtml(s.contentMarkdown));
     if (s.callout) {

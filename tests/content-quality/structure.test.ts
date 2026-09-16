@@ -32,4 +32,20 @@ describe("evaluateStructure", () => {
     const result = evaluateStructure(post);
     expect(result.failedChecks.some((f) => f.code === "STRUCTURE_INVALID" && f.severity === "blocking")).toBe(true);
   });
+
+  it("flags DUPLICATE_CONCLUSION when a conclusion-type section has its own real content", () => {
+    const post = goodPost({
+      sections: [
+        ...goodPost().sections,
+        { type: "conclusion", heading: "Wrapping Up", contentMarkdown: "A whole separate closing section." },
+      ],
+    });
+    const result = evaluateStructure(post);
+    expect(result.failedChecks.some((f) => f.code === "DUPLICATE_CONCLUSION")).toBe(true);
+  });
+
+  it("does not flag DUPLICATE_CONCLUSION when there is no conclusion-type section", () => {
+    const result = evaluateStructure(goodPost());
+    expect(result.failedChecks.some((f) => f.code === "DUPLICATE_CONCLUSION")).toBe(false);
+  });
 });

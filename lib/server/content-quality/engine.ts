@@ -16,6 +16,7 @@ import { evaluateStructure } from "./structure";
 import { evaluateSpamSignals } from "./spamDetection";
 import { evaluateFactuality } from "./factuality";
 import { evaluateFreshness } from "./freshness";
+import { evaluateEvidenceClaims } from "./evidenceClaims";
 import { buildQualityReport } from "./scoring";
 import { decideQualityGate } from "./qualityGate";
 import { applyDeterministicFixes } from "./autoFix";
@@ -80,12 +81,13 @@ async function validate(
   const spam = evaluateSpamSignals(post, brief, request.language);
   const factuality = evaluateFactuality(request);
   const freshness = evaluateFreshness(request, post);
+  const evidence = evaluateEvidenceClaims(request, post);
 
   return buildQualityReport({
     wordCount: countWords(post),
     keywordCoverage: keyword.keywordCoverage,
     revisionCount,
-    outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness },
+    outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence },
   });
 }
 
