@@ -36,21 +36,22 @@ export default function ContentQualityPage() {
         <p className="font-mono text-xs text-indigo">Reference</p>
         <h1 className="mt-2 font-display text-3xl font-medium text-ink">Content quality pipeline</h1>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
-          The API never returns the first thing the model generates. Every request — synchronous or async —
-          goes through the same pipeline: generate, validate against a battery of deterministic checks plus a
-          supplementary LLM quality review, automatically revise anything that falls short, and re-validate.
-          Only content that clears every mandatory check is ever returned.
+          The API never returns the first thing the model generates, but it also never spends more than one
+          extra AI call fixing it. Every request — synchronous or async — goes through the same pipeline:
+          generate once, validate deterministically, fix anything mechanically fixable for free, validate again,
+          and only spend one targeted AI repair call if a genuine semantic problem remains. A request never makes
+          more than 2 Anthropic calls total.
         </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Pipeline flow</h2>
         <ol className="mt-3 list-decimal space-y-2 pl-5 font-body text-[15px] text-muted">
           <li>A content brief and internal SEO plan are derived from your request (keywords, topic, audience) and folded into the generation prompt.</li>
-          <li>The model generates a first draft.</li>
-          <li>Deterministic validators run across writing quality, originality, depth, SEO, keywords, readability, structure, spam signals, factuality, and freshness.</li>
-          <li>A supplementary LLM evaluator scores usefulness, depth, search-intent match, and originality of ideas — it is never the sole authority, and it never simply declares a perfect score without justification.</li>
-          <li>If any mandatory check fails, a targeted revision request (only the specific problems found) is sent back to the model — not a blind full regeneration.</li>
-          <li>The revised draft is validated again from scratch, exactly like the first draft.</li>
-          <li>This repeats up to a configured revision limit. If content still fails after that, the request fails with <code className="font-mono">CONTENT_QUALITY_FAILED</code> rather than returning substandard content.</li>
+          <li>The model generates a first draft — Anthropic call 1 of at most 2.</li>
+          <li>Deterministic validators run across writing quality, originality, depth, SEO, keywords, readability, structure, spam signals, factuality, and freshness. If nothing fails, the response returns immediately.</li>
+          <li>Anything mechanically fixable (slug format, a stray year in the title, clickbait phrasing, a too-short title, a generic/thin meta description, duplicate headings, weak FAQs, a keyword-stuffed heading) is corrected locally, in code, with zero extra AI calls — then re-validated. If that&rsquo;s enough, the response returns here.</li>
+          <li>Only if a genuine semantic problem remains (writing quality, originality, depth, or keyword-density issues that require real rewriting) is ONE targeted repair call made — Anthropic call 2 of at most 2. It receives only the specific failed checks and returns a minimal patch of just the fields/sections that need to change, never the whole article rewritten from scratch.</li>
+          <li>The patch is merged onto the existing post — everything not in the patch is preserved exactly — and validated again, followed by one more free mechanical cleanup pass.</li>
+          <li>The request fails with <code className="font-mono">CONTENT_QUALITY_FAILED</code> only if a genuine, unresolved quality problem remains after this — never merely because a cosmetic/non-critical check is still imperfect, and never by silently lowering the bar.</li>
         </ol>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">What gets checked</h2>
@@ -106,11 +107,11 @@ export default function ContentQualityPage() {
           <JsonBlock data={{ quality: generateResponseExample.quality }} filename="quality summary" />
         </div>
 
-        <h2 className="mt-10 font-display text-xl font-medium text-ink">When it can&rsquo;t be fixed in time</h2>
+        <h2 className="mt-10 font-display text-xl font-medium text-ink">When it can&rsquo;t be fixed</h2>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
-          If content still fails mandatory checks after the revision limit, the request fails instead of
-          returning substandard content. <code className="font-mono">details.failedCheckCodes</code> lists which
-          internal checks were still failing — see{" "}
+          If a genuine problem remains after the deterministic pass and the one repair call, the request fails
+          instead of returning substandard content. <code className="font-mono">details.failedCheckCodes</code>{" "}
+          lists which internal checks were still failing — see{" "}
           <a href="/docs/error-codes" className="text-indigo hover:underline">error codes</a> for the full list.
         </p>
         <div className="mt-3">
@@ -125,8 +126,8 @@ export default function ContentQualityPage() {
           that can&rsquo;t pass ends in <code className="font-mono">status: &quot;failed&quot;</code> with the same
           error code in <code className="font-mono">job.error</code>, and the same information in a{" "}
           <code className="font-mono">job.failed</code> webhook if one is configured. Usage metering and rate
-          limits apply the same way regardless of how many internal revision attempts a request took — you are
-          billed for the one request you made, not for internal retries.
+          limits apply the same way regardless of whether the pipeline needed its one repair call — you are
+          billed for the one request you made, not for internal fix attempts.
         </p>
       </div>
     </DocsPageShell>

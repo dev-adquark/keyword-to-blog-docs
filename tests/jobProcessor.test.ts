@@ -70,7 +70,6 @@ const passingReport = {
   failedChecks: [],
   warnings: [],
   revisionReasons: [],
-  llmEvaluatorAvailable: false,
 };
 
 function baseJob(overrides: Partial<Record<string, unknown>> = {}) {

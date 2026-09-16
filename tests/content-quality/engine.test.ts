@@ -1,50 +1,42 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AIProvider } from "@/lib/server/generation/provider";
+import type { RepairPatch } from "@/lib/types";
 import { baseRequest, goodPost } from "./fixtures";
-
-// The LLM evaluator makes a real network call in production — mock it here
-// so this test is fully offline/deterministic and exercises the
-// deterministic-validator-driven revision loop specifically.
-vi.mock("@/lib/server/content-quality/llmEvaluator", () => ({
-  runLLMEvaluator: vi.fn(async () => ({
-    available: false,
-    usefulnessScore: null,
-    depthScore: null,
-    searchIntentMatchScore: null,
-    naturalWritingScore: null,
-    originalityOfIdeasScore: null,
-    factualPlausibilityScore: null,
-    concerns: [],
-  })),
-}));
 
 const { runContentQualityPipeline, ContentQualityFailedError } = await import("@/lib/server/content-quality/engine");
 
-const badPost = () =>
-  goodPost({
-    title: "Passwords",
+// Identical to goodPost() except the introduction is a generic, templated
+// opener — everything else (title, body sections, structure) is already
+// valid, so only writingQuality's GENERIC_INTRO check should fire. This
+// isolates the repair call to fixing exactly one real, targeted problem.
+const badPost = () => {
+  const base = goodPost();
+  return {
+    ...base,
     sections: [
       {
-        type: "introduction",
+        ...base.sections[0]!,
         contentMarkdown: "In today's digital landscape, security matters more than ever for everyone involved.",
       },
+      ...base.sections.slice(1),
     ],
-  });
+  };
+};
 
 function fakeProvider(overrides: Partial<AIProvider> = {}): AIProvider {
   return {
-    generate: vi.fn(async () => badPost()),
-    revise: vi.fn(async () => badPost()),
+    generate: vi.fn(async () => goodPost()),
+    repair: vi.fn(async (): Promise<RepairPatch> => ({})),
     ...overrides,
   };
 }
 
 describe("runContentQualityPipeline (integration)", () => {
   beforeEach(() => {
-    vi.unstubAllEnvs();
+    vi.clearAllMocks();
   });
 
-  it("passes immediately when the first generation is already good — no revision call at all", async () => {
+  it("passes immediately when the first generation is already good — zero AI calls beyond generate", async () => {
     const provider = fakeProvider({ generate: vi.fn(async () => goodPost()) });
 
     const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
@@ -52,44 +44,85 @@ describe("runContentQualityPipeline (integration)", () => {
     expect(report.overallStatus).toBe("PASS");
     expect(report.revisionCount).toBe(0);
     expect(post.title).toBe(goodPost().title);
-    expect(provider.revise).not.toHaveBeenCalled();
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(provider.repair).not.toHaveBeenCalled();
   });
 
-  it("initial generation FAILS quality, revision PASSES — the caller only ever receives the revised, validated content", async () => {
+  it("fixes a mechanically-fixable problem (bad slug) for free — never calls repair", async () => {
     const provider = fakeProvider({
-      generate: vi.fn(async () => badPost()),
-      revise: vi.fn(async () => goodPost()),
+      generate: vi.fn(async () => goodPost({ slugSuggestion: "Not A Valid Slug!!" })),
+    });
+
+    const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
+
+    expect(report.overallStatus).toBe("PASS");
+    expect(post.slugSuggestion).toMatch(/^[a-z0-9]+(-[a-z0-9]+)*$/);
+    expect(provider.repair).not.toHaveBeenCalled(); // deterministic fix alone was enough
+  });
+
+  it("uses exactly ONE targeted repair call for a semantic issue, merges the patch, and preserves untouched sections", async () => {
+    const initial = badPost();
+    const provider = fakeProvider({
+      generate: vi.fn(async () => initial),
+      repair: vi.fn(async (): Promise<RepairPatch> => ({
+        sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }],
+      })),
     });
 
     const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
 
     expect(report.overallStatus).toBe("PASS");
     expect(report.revisionCount).toBe(1);
-    // The bad first draft's distinguishing title must never leak into the response.
-    expect(post.title).not.toBe(badPost().title);
-    expect(post.title).toBe(goodPost().title);
-    expect(provider.revise).toHaveBeenCalledTimes(1);
-
-    const revisionCallArgs = vi.mocked(provider.revise).mock.calls[0]?.[0];
-    expect(revisionCallArgs?.feedback.failedChecks.some((f) => f.code === "GENERIC_INTRO")).toBe(true);
-    expect(revisionCallArgs?.previous.title).toBe(badPost().title);
+    expect(provider.repair).toHaveBeenCalledTimes(1);
+    // The repair patch only touched section 0 — everything else came from
+    // the original generation, proving "never regenerate the whole article".
+    expect(post.title).toBe(initial.title);
   });
 
-  it("exhausts the configured revision limit and throws CONTENT_QUALITY_FAILED rather than returning bad content", async () => {
-    vi.stubEnv("CONTENT_QUALITY_MAX_REVISIONS", "1");
+  it("passes the repair call only the still-blocking failures, not every warning", async () => {
+    const provider = fakeProvider({ generate: vi.fn(async () => badPost()) });
+    await runContentQualityPipeline(baseRequest(), provider).catch(() => {});
+
+    const repairArgs = vi.mocked(provider.repair).mock.calls[0]?.[0];
+    expect(repairArgs?.failedChecks.every((f) => f.severity === "blocking")).toBe(true);
+    expect(repairArgs?.failedChecks.some((f) => f.code === "GENERIC_INTRO")).toBe(true);
+  });
+
+  it("never makes more than 2 total Anthropic calls (1 generate + 1 repair), even when the repair doesn't fully fix things", async () => {
     const provider = fakeProvider({
       generate: vi.fn(async () => badPost()),
-      revise: vi.fn(async () => badPost()), // revision never actually fixes anything
+      repair: vi.fn(async (): Promise<RepairPatch> => ({})), // repair that changes nothing
     });
 
-    await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(
-      ContentQualityFailedError
-    );
-    expect(provider.revise).toHaveBeenCalledTimes(1);
+    await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(ContentQualityFailedError);
+    expect(provider.generate).toHaveBeenCalledTimes(1);
+    expect(provider.repair).toHaveBeenCalledTimes(1);
   });
 
-  it("the thrown error carries the full internal report (for DB persistence) but a minimal public details payload", async () => {
-    vi.stubEnv("CONTENT_QUALITY_MAX_REVISIONS", "0");
+  it("still passes when the repair introduces a cosmetic, non-blocking issue — the final mechanical pass cleans it up (or it's simply tolerated); it never blocks PASS either way", async () => {
+    // Repair fixes the semantic GENERIC_INTRO problem but introduces a
+    // cosmetic issue (an unnecessary year in the title) along the way.
+    const provider = fakeProvider({
+      generate: vi.fn(async () => badPost()),
+      repair: vi.fn(async (): Promise<RepairPatch> => ({
+        title: "Strong Password Security Practices: A Guide for 2024",
+        sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }],
+      })),
+    });
+
+    const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
+    expect(report.overallStatus).toBe("PASS");
+    // The free final mechanical pass strips the stray year rather than just tolerating it.
+    expect(post.title).not.toMatch(/\b(19|20)\d{2}\b/);
+  });
+
+  it("throws CONTENT_QUALITY_FAILED only after both the mechanical pass and the one repair call fail to resolve blocking issues", async () => {
+    const provider = fakeProvider({ generate: vi.fn(async () => badPost()) });
+
+    await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(ContentQualityFailedError);
+  });
+
+  it("the thrown error carries the full report plus a minimal, curated public details payload", async () => {
     const provider = fakeProvider({ generate: vi.fn(async () => badPost()) });
 
     try {
@@ -100,19 +133,17 @@ describe("runContentQualityPipeline (integration)", () => {
       const failure = err as InstanceType<typeof ContentQualityFailedError>;
       expect(failure.code).toBe("CONTENT_QUALITY_FAILED");
       expect(failure.report.failedChecks.some((f) => f.code === "GENERIC_INTRO")).toBe(true);
-      // Public details are curated — codes only, never full messages/scores breakdown.
       expect(failure.details?.failedCheckCodes).toContain("GENERIC_INTRO");
       expect(failure.details?.failedChecks).toBeUndefined();
     }
   });
 
-  it("never lets factualityMode: 'verified' pass, and never burns a revision attempt trying to fix it", async () => {
+  it("never lets factualityMode: 'verified' pass, and never spends the repair call trying to fix it", async () => {
     const provider = fakeProvider({ generate: vi.fn(async () => goodPost()) });
 
     await expect(
       runContentQualityPipeline(baseRequest({ factualityMode: "verified" }), provider)
     ).rejects.toBeInstanceOf(ContentQualityFailedError);
-    // Unfixable by definition — revising the wording can't grant source-retrieval capability.
-    expect(provider.revise).not.toHaveBeenCalled();
+    expect(provider.repair).not.toHaveBeenCalled();
   });
 });

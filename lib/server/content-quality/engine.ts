@@ -16,11 +16,10 @@ import { evaluateStructure } from "./structure";
 import { evaluateSpamSignals } from "./spamDetection";
 import { evaluateFactuality } from "./factuality";
 import { evaluateFreshness } from "./freshness";
-import { runLLMEvaluator, type LLMEvaluatorResult } from "./llmEvaluator";
 import { buildQualityReport } from "./scoring";
 import { decideQualityGate } from "./qualityGate";
-import { buildRevisionFeedback } from "./revision";
-import { getMaxRevisions } from "./config";
+import { applyDeterministicFixes } from "./autoFix";
+import { applyRepairPatch } from "./repairPatch";
 
 export interface QualityPipelineResult {
   post: SEOPostV1;
@@ -40,7 +39,7 @@ export class ContentQualityFailedError extends ApiError {
   constructor(report: ContentQualityReport) {
     super(
       "CONTENT_QUALITY_FAILED",
-      "Generated content did not meet the required quality standard after automatic revision.",
+      "Generated content did not meet the required quality standard after automatic correction.",
       {
         revisionCount: report.revisionCount,
         overallScore: report.overallScore,
@@ -51,24 +50,19 @@ export class ContentQualityFailedError extends ApiError {
   }
 }
 
-const UNAVAILABLE_LLM_RESULT: LLMEvaluatorResult = {
-  available: false,
-  usefulnessScore: null,
-  depthScore: null,
-  searchIntentMatchScore: null,
-  naturalWritingScore: null,
-  originalityOfIdeasScore: null,
-  factualPlausibilityScore: null,
-  concerns: [],
-};
-
 /**
- * Runs every deterministic validator, then (unless the structure is already
- * broken beyond usefulness) the supplementary LLM evaluator, and folds the
- * results into one report. Deterministic checks first, cheap, always run;
- * the LLM call is skipped when it would be evaluating unusable output — see
- * "avoid unnecessary model calls" in the pipeline's performance principles.
+ * FACTUALITY_UNVERIFIED / FRESHNESS_UNVERIFIED (blocking) mean the request
+ * needs source verification this deployment cannot perform — no amount of
+ * mechanical fixing or AI repair grants that capability, so the one repair
+ * call is never spent chasing an unfixable capability gap.
  */
+function isUnfixableByRepair(report: Omit<ContentQualityReport, "overallStatus">): boolean {
+  return report.failedChecks.some(
+    (f) => f.severity === "blocking" && (f.code === "FACTUALITY_UNVERIFIED" || f.code === "FRESHNESS_UNVERIFIED")
+  );
+}
+
+/** Runs every deterministic validator and folds the results into one report. */
 async function validate(
   request: GenerateRequestV1,
   post: SEOPostV1,
@@ -76,34 +70,47 @@ async function validate(
 ): Promise<Omit<ContentQualityReport, "overallStatus">> {
   const brief = buildContentBrief(request);
 
-  const structure = evaluateStructure(post);
-  const hasBrokenStructure = structure.failedChecks.some((f) => f.severity === "blocking");
-
   const writing = evaluateWritingQuality(post, request.language);
   const originality = evaluateOriginality(post);
   const depth = evaluateDepth(post, brief);
   const seo = evaluateSeoQuality(post, brief);
   const readability = evaluateReadability(post, brief);
   const keyword = evaluateKeywordQuality(post, brief);
+  const structure = evaluateStructure(post);
   const spam = evaluateSpamSignals(post, brief, request.language);
   const factuality = evaluateFactuality(request);
   const freshness = evaluateFreshness(request, post);
-
-  const llm = hasBrokenStructure ? UNAVAILABLE_LLM_RESULT : await runLLMEvaluator(post, brief);
 
   return buildQualityReport({
     wordCount: countWords(post),
     keywordCoverage: keyword.keywordCoverage,
     revisionCount,
-    outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, llm },
+    outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness },
   });
 }
 
+function finalizePost(post: SEOPostV1, request: GenerateRequestV1): SEOPostV1 {
+  const constrained = enforceSectionConstraint(post, request.constraints);
+  assertWordCountWithinTolerance(countWords(constrained), request.constraints);
+  return constrained;
+}
+
+function withStatus(report: Omit<ContentQualityReport, "overallStatus">): ContentQualityReport {
+  return { ...report, overallStatus: decideQualityGate(report) };
+}
+
 /**
- * The single entry point both the sync /v1/generate route and the async job
- * processor call — mirrors postRender.ts's "must never drift" pattern.
- * Never returns unvalidated content: every path either returns a PASSing
- * report or throws CONTENT_QUALITY_FAILED.
+ * generate → validate → (free) deterministic fix → validate → (at most ONE)
+ * targeted AI repair → validate → return. Maximum 2 Anthropic calls total
+ * per request (generate + repair) — never a third, and the repair call is
+ * a minimal patch, never a full re-generation.
+ *
+ * CONTENT_QUALITY_FAILED is thrown only when: a capability gap makes the
+ * request unfixable by design (factualityMode: "verified" — see
+ * isUnfixableByRepair), or blocking failures remain after both the
+ * deterministic pass and the one repair call. A report with zero blocking
+ * failedChecks always passes, regardless of its overall/category scores —
+ * see qualityGate.ts's bug-fix comment for why that specifically matters.
  */
 export async function runContentQualityPipeline(
   request: GenerateRequestV1,
@@ -111,36 +118,44 @@ export async function runContentQualityPipeline(
 ): Promise<QualityPipelineResult> {
   const brief = buildContentBrief(request);
   const plan = buildSeoPlan(request, brief);
-  const maxRevisions = getMaxRevisions();
 
-  let post = enforceSectionConstraint(await provider.generate(request, { brief, plan }), request.constraints);
-  assertWordCountWithinTolerance(countWords(post), request.constraints);
+  // Anthropic call 1 of at most 2.
+  let post = finalizePost(await provider.generate(request, { brief, plan }), request);
+  let report = withStatus(await validate(request, post, 0));
 
-  for (let revisionCount = 0; ; revisionCount++) {
-    const reportWithoutStatus = await validate(request, post, revisionCount);
+  if (report.overallStatus === "PASS") return { post, report };
+  if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
 
-    // A capability gap (no source verification available) can never be
-    // fixed by asking the model to try again — don't burn revision attempts on it.
-    const unfixable = reportWithoutStatus.failedChecks.some(
-      (f) => f.code === "FACTUALITY_UNVERIFIED" && f.severity === "blocking"
-    );
-    const revisionsRemaining = !unfixable && revisionCount < maxRevisions;
-    const overallStatus = decideQualityGate(reportWithoutStatus, revisionsRemaining);
-    const report: ContentQualityReport = { ...reportWithoutStatus, overallStatus };
-
-    if (overallStatus === "PASS") {
-      return { post, report };
-    }
-
-    if (overallStatus === "FAIL") {
-      throw new ContentQualityFailedError(report);
-    }
-
-    const feedback = buildRevisionFeedback(reportWithoutStatus);
-    const revised = await provider.revise({ request, previous: post, feedback, context: { brief, plan } });
-    post = enforceSectionConstraint(revised, request.constraints);
-    assertWordCountWithinTolerance(countWords(post), request.constraints);
+  // Deterministic/local fixes — free, no AI call, applied for every
+  // matching mechanical issue regardless of severity (cosmetic problems are
+  // free to clean up too, not just blocking ones).
+  const mechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
+  if (mechanicalFix.appliedFixes.length > 0) {
+    post = finalizePost(mechanicalFix.post, request);
+    report = withStatus(await validate(request, post, 0));
+    if (report.overallStatus === "PASS") return { post, report };
+    if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
   }
+
+  // Anthropic call 2 of at most 2 — ONE targeted repair for whatever is
+  // still blocking (semantic writing/depth/originality/keyword issues that
+  // mechanical fixes genuinely can't rewrite prose for).
+  const blockingFailures = report.failedChecks.filter((f) => f.severity === "blocking");
+  const patch = await provider.repair({ request, post, failedChecks: blockingFailures, context: { brief, plan } });
+  post = finalizePost(applyRepairPatch(post, patch), request);
+  report = withStatus(await validate(request, post, 1));
+
+  // One more free mechanical pass to mop up anything cosmetic the repair
+  // call left behind or introduced — the "safest available fallback
+  // correction" step — before finally deciding. Costs nothing (no AI call).
+  const finalMechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
+  if (finalMechanicalFix.appliedFixes.length > 0) {
+    post = finalizePost(finalMechanicalFix.post, request);
+    report = withStatus(await validate(request, post, 1));
+  }
+
+  if (report.overallStatus === "PASS") return { post, report };
+  throw new ContentQualityFailedError(report);
 }
 
 export function toQualitySummary(report: ContentQualityReport): ContentQualitySummary {

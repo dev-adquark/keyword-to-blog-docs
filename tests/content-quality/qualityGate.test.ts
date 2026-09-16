@@ -4,7 +4,7 @@ import type { ContentQualityReport } from "@/lib/types";
 
 function report(overrides: Partial<Omit<ContentQualityReport, "overallStatus">> = {}): Omit<ContentQualityReport, "overallStatus"> {
   return {
-    qualityVersion: "1.0.0",
+    qualityVersion: "2.0.0",
     overallScore: 90,
     writingScore: 90,
     originalityScore: 90,
@@ -22,44 +22,53 @@ function report(overrides: Partial<Omit<ContentQualityReport, "overallStatus">> 
     failedChecks: [],
     warnings: [],
     revisionReasons: [],
-    llmEvaluatorAvailable: true,
     ...overrides,
   };
 }
 
 describe("decideQualityGate", () => {
-  it("passes when there are no blocking failures and every score clears its threshold", () => {
-    expect(decideQualityGate(report(), true)).toBe("PASS");
+  it("REGRESSION: overallScore 90, zero failedChecks, revisionCount 2 must PASS, not FAIL", () => {
+    // Exact bug report: a genuinely valid result (no identified, actionable
+    // problem) was being rejected because a since-removed second gate
+    // required every individual category score to independently clear its
+    // own threshold, disconnected from any actual failedCheck.
+    const buggyInput = report({ overallScore: 90, failedChecks: [], revisionCount: 2 });
+    expect(decideQualityGate(buggyInput)).toBe("PASS");
   });
 
-  it("requires revision when a blocking failure exists and revisions remain", () => {
+  it("passes when there are no blocking failedChecks", () => {
+    expect(decideQualityGate(report())).toBe("PASS");
+  });
+
+  it("fails when a blocking failedCheck is present", () => {
     const withFailure = report({
       failedChecks: [{ code: "KEYWORD_STUFFING", severity: "blocking", message: "x" }],
     });
-    expect(decideQualityGate(withFailure, true)).toBe("REVISION_REQUIRED");
+    expect(decideQualityGate(withFailure)).toBe("FAIL");
   });
 
-  it("fails outright when a blocking failure exists and no revisions remain", () => {
-    const withFailure = report({
-      failedChecks: [{ code: "KEYWORD_STUFFING", severity: "blocking", message: "x" }],
-    });
-    expect(decideQualityGate(withFailure, false)).toBe("FAIL");
-  });
-
-  it("a warning-only report (no blocking failures) still passes even with revisions remaining", () => {
+  it("a warning-only report still passes, even with a low overall score", () => {
     const warningOnly = report({
+      overallScore: 40,
+      writingScore: 40,
       failedChecks: [{ code: "SENTENCES_TOO_LONG", severity: "warning", message: "x" }],
     });
-    expect(decideQualityGate(warningOnly, true)).toBe("PASS");
+    expect(decideQualityGate(warningOnly)).toBe("PASS");
   });
 
-  it("fails a collectively-weak report even with zero individual blocking failedChecks", () => {
-    const belowThreshold = report({ overallScore: 40, writingScore: 40 });
-    expect(decideQualityGate(belowThreshold, false)).toBe("FAIL");
+  it("a collectively low overall/category score with zero blocking failedChecks still passes — cosmetic imperfections never fail the gate on their own", () => {
+    const lowButNoBlockingIssues = report({ overallScore: 35, writingScore: 20, structureScore: 25, failedChecks: [] });
+    expect(decideQualityGate(lowButNoBlockingIssues)).toBe("PASS");
   });
 
-  it("requests revision for a below-threshold report while revisions remain", () => {
-    const belowThreshold = report({ overallScore: 40, writingScore: 40 });
-    expect(decideQualityGate(belowThreshold, true)).toBe("REVISION_REQUIRED");
+  it("multiple blocking failures still fail regardless of score", () => {
+    const manyFailures = report({
+      overallScore: 95,
+      failedChecks: [
+        { code: "LOW_EXPERT_DEPTH", severity: "blocking", message: "a" },
+        { code: "KEYWORD_STUFFING", severity: "blocking", message: "b" },
+      ],
+    });
+    expect(decideQualityGate(manyFailures)).toBe("FAIL");
   });
 });

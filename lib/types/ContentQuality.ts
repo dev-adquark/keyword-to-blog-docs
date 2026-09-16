@@ -48,7 +48,11 @@ export interface RevisionFeedback {
 
 export type FactualityStatus = "STANDARD_UNVERIFIED" | "VERIFICATION_UNAVAILABLE";
 export type FreshnessStatus = "NOT_APPLICABLE" | "UNVERIFIED_ACCEPTABLE" | "UNVERIFIED_BLOCKED";
-export type QualityGateStatus = "PASS" | "REVISION_REQUIRED" | "FAIL";
+/** Only two outcomes now — see lib/server/content-quality/qualityGate.ts:
+ * any blocking failedCheck fails the gate, everything else passes. There is
+ * no longer an intermediate "keep looping" status; the engine sequences a
+ * fixed generate → mechanical-fix → repair flow explicitly instead. */
+export type QualityGateStatus = "PASS" | "FAIL";
 
 /** Full internal report — logged/stored, never returned to the API consumer
  * verbatim (see ContentQualitySummary for the public-safe subset). */
@@ -67,12 +71,12 @@ export interface ContentQualityReport {
   freshnessStatus: FreshnessStatus;
   wordCount: number;
   keywordCoverage: number;
+  /** 0 or 1 — whether the one allowed AI repair call was used (see the 2-call budget in engine.ts). */
   revisionCount: number;
   passedChecks: string[];
   failedChecks: FailedCheck[];
   warnings: string[];
   revisionReasons: string[];
-  llmEvaluatorAvailable: boolean;
 }
 
 /** The only quality information ever returned in a public API response —
@@ -84,14 +88,17 @@ export interface ContentQualitySummary {
   qualityVersion: string;
 }
 
-/** Schema-validated shape of the LLM quality evaluator's own output — never
- * trusted as the sole signal (see lib/server/content-quality/llmEvaluator.ts). */
-export interface LLMEvaluation {
-  usefulnessScore: number;
-  depthScore: number;
-  searchIntentMatchScore: number;
-  naturalWritingScore: number;
-  originalityOfIdeasScore: number;
-  factualPlausibilityScore: number;
-  concerns: string[];
+/**
+ * A partial, targeted correction for specific fields/sections — never a full
+ * re-generation. Returned by AIProvider.repair() and merged onto the
+ * existing post, preserving everything not explicitly patched (see
+ * lib/server/content-quality/repairPatch.ts).
+ */
+export interface RepairPatch {
+  title?: string;
+  slugSuggestion?: string;
+  meta?: { description?: string; primaryKeyword?: string };
+  sections?: Array<{ index: number; heading?: string; contentMarkdown?: string }>;
+  faqs?: Array<{ question: string; answer: string }>;
+  conclusion?: string;
 }

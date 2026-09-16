@@ -138,14 +138,29 @@ export const accessRequestSchema = z.object({
   reason: z.string().trim().max(1000).optional(),
 });
 
-/** Validates the LLM quality evaluator's own output before it's trusted for
- * anything — never let the model just declare a bare "quality = 100". */
-export const llmEvaluationSchema = z.object({
-  usefulnessScore: z.number().min(0).max(100),
-  depthScore: z.number().min(0).max(100),
-  searchIntentMatchScore: z.number().min(0).max(100),
-  naturalWritingScore: z.number().min(0).max(100),
-  originalityOfIdeasScore: z.number().min(0).max(100),
-  factualPlausibilityScore: z.number().min(0).max(100),
-  concerns: z.array(z.string()).max(20).default([]),
+/**
+ * Validates the model's targeted repair output — a PARTIAL patch, never a
+ * full re-generation. Every field is optional (the model only returns what
+ * it actually fixed); whatever it omits is left untouched by the caller.
+ */
+export const repairPatchSchema = z.object({
+  title: z.string().min(1).optional(),
+  slugSuggestion: z.string().min(1).optional(),
+  meta: z
+    .object({
+      description: z.string().min(1).optional(),
+      primaryKeyword: z.string().min(1).optional(),
+    })
+    .optional(),
+  sections: z
+    .array(
+      z.object({
+        index: z.number().int().min(0),
+        heading: z.string().optional(),
+        contentMarkdown: z.string().min(1).optional(),
+      })
+    )
+    .optional(),
+  faqs: z.array(z.object({ question: z.string(), answer: z.string() })).optional(),
+  conclusion: z.string().min(1).optional(),
 });

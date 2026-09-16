@@ -7,8 +7,8 @@ import { tokenizeWords } from "./textStats";
  * Word count alone is never treated as depth — this looks for concrete
  * signals that a section actually says something (numbers, named specifics,
  * examples, structured guidance) rather than padding around a vague claim.
- * This is a deterministic proxy signal; the LLM evaluator (llmEvaluator.ts)
- * supplements it with a genuine judgment-based depth score.
+ * Purely deterministic (no AI call) — see engine.ts for the 2-Anthropic-
+ * call-per-request budget this exists to stay within.
  */
 
 const CONCRETE_MARKERS = [

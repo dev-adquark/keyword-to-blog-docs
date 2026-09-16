@@ -11,7 +11,6 @@ import type { StructureResult } from "./structure";
 import type { SpamDetectionResult } from "./spamDetection";
 import type { FactualityResult } from "./factuality";
 import type { FreshnessResult } from "./freshness";
-import type { LLMEvaluatorResult } from "./llmEvaluator";
 
 export interface ValidatorOutputs {
   writing: WritingQualityResult;
@@ -24,18 +23,13 @@ export interface ValidatorOutputs {
   spam: SpamDetectionResult;
   factuality: FactualityResult;
   freshness: FreshnessResult;
-  llm: LLMEvaluatorResult;
 }
 
-/** Blends a deterministic score with the LLM evaluator's corresponding
- * signal when available — the deterministic score is never fully replaced,
- * only nudged, per "never depend entirely on the LLM evaluator". */
-function blend(deterministic: number, llmScore: number | null, llmWeight = 0.35): number {
-  if (llmScore === null) return deterministic;
-  return deterministic * (1 - llmWeight) + llmScore * llmWeight;
-}
-
-/** Builds a report without deciding pass/fail — see qualityGate.ts for that. */
+/** Builds a report without deciding pass/fail — see qualityGate.ts for that.
+ * Scores are purely deterministic (no LLM blending) — every category score
+ * is fully attributable to actual failedChecks from real validators, which
+ * is what makes the qualityGate's "only blocking failedChecks can fail"
+ * rule coherent (see qualityGate.ts's bug-fix comment). */
 export function buildQualityReport(params: {
   wordCount: number;
   keywordCoverage: number;
@@ -44,13 +38,10 @@ export function buildQualityReport(params: {
 }): Omit<ContentQualityReport, "overallStatus"> {
   const { outputs } = params;
 
-  const writingScore = blend(outputs.writing.score, outputs.llm.naturalWritingScore);
-  const originalityScore = blend(outputs.originality.score, outputs.llm.originalityOfIdeasScore);
-  const depthScore = blend(outputs.depth.score, outputs.llm.depthScore);
-  const seoScore = blend(
-    (outputs.seo.score + outputs.spam.score) / 2,
-    outputs.llm.searchIntentMatchScore
-  );
+  const writingScore = outputs.writing.score;
+  const originalityScore = outputs.originality.score;
+  const depthScore = outputs.depth.score;
+  const seoScore = Math.round((outputs.seo.score + outputs.spam.score) / 2);
   const readabilityScore = outputs.readability.score;
   const keywordScore = outputs.keyword.score;
   const structureScore = outputs.structure.score;
@@ -84,12 +75,6 @@ export function buildQualityReport(params: {
     ...outputs.freshness.warnings,
   ];
 
-  if (!outputs.llm.available) {
-    warnings.push("LLM quality evaluator was unavailable for this attempt — scoring relied on deterministic checks only.");
-  } else if (outputs.llm.concerns.length > 0) {
-    warnings.push(...outputs.llm.concerns.map((c) => `LLM evaluator concern: ${c}`));
-  }
-
   const categories: Array<{ name: string; failedChecks: FailedCheck[] }> = [
     { name: "writing", failedChecks: outputs.writing.failedChecks },
     { name: "originality", failedChecks: outputs.originality.failedChecks },
@@ -106,13 +91,13 @@ export function buildQualityReport(params: {
   return {
     qualityVersion: QUALITY_VERSION,
     overallScore,
-    writingScore: Math.round(writingScore),
-    originalityScore: Math.round(originalityScore),
-    depthScore: Math.round(depthScore),
-    seoScore: Math.round(seoScore),
-    readabilityScore: Math.round(readabilityScore),
-    keywordScore: Math.round(keywordScore),
-    structureScore: Math.round(structureScore),
+    writingScore,
+    originalityScore,
+    depthScore,
+    seoScore,
+    readabilityScore,
+    keywordScore,
+    structureScore,
     factualityStatus: outputs.factuality.status,
     freshnessStatus: outputs.freshness.status,
     wordCount: params.wordCount,
@@ -122,6 +107,5 @@ export function buildQualityReport(params: {
     failedChecks: allFailedChecks,
     warnings,
     revisionReasons: allFailedChecks.filter((f) => f.severity === "blocking").map((f) => f.message),
-    llmEvaluatorAvailable: outputs.llm.available,
   };
 }

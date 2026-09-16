@@ -66,17 +66,6 @@ export const env = {
   get RESEND_FROM_EMAIL() {
     return optional("RESEND_FROM_EMAIL", "onboarding@resend.dev");
   },
-  /** Max automatic-revision attempts before CONTENT_QUALITY_FAILED. */
-  get CONTENT_QUALITY_MAX_REVISIONS() {
-    const raw = process.env.CONTENT_QUALITY_MAX_REVISIONS;
-    const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 2;
-  },
-  /** Model used for LLM-based quality evaluation — defaults to the same
-   * generation model so no extra config is required to get this feature. */
-  get CONTENT_QUALITY_EVALUATOR_MODEL() {
-    return process.env.CONTENT_QUALITY_EVALUATOR_MODEL || env.AI_MODEL;
-  },
 };
 
 /** Whether durable async job delivery (QStash) is configured. */
