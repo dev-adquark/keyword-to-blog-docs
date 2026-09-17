@@ -25,8 +25,8 @@ const badPost = () => {
 
 function fakeProvider(overrides: Partial<AIProvider> = {}): AIProvider {
   return {
-    generate: vi.fn(async () => goodPost()),
-    repair: vi.fn(async (): Promise<RepairPatch> => ({})),
+    generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false })),
+    repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false })),
     ...overrides,
   };
 }
@@ -37,7 +37,7 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("passes immediately when the first generation is already good — zero AI calls beyond generate", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => goodPost()) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false })) });
 
     const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
 
@@ -50,7 +50,7 @@ describe("runContentQualityPipeline (integration)", () => {
 
   it("fixes a mechanically-fixable problem (bad slug) for free — never calls repair", async () => {
     const provider = fakeProvider({
-      generate: vi.fn(async () => goodPost({ slugSuggestion: "Not A Valid Slug!!" })),
+      generate: vi.fn(async () => ({ post: goodPost({ slugSuggestion: "Not A Valid Slug!!" }), groundedInSearch: false })),
     });
 
     const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
@@ -63,9 +63,10 @@ describe("runContentQualityPipeline (integration)", () => {
   it("uses exactly ONE targeted repair call for a semantic issue, merges the patch, and preserves untouched sections", async () => {
     const initial = badPost();
     const provider = fakeProvider({
-      generate: vi.fn(async () => initial),
-      repair: vi.fn(async (): Promise<RepairPatch> => ({
-        sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }],
+      generate: vi.fn(async () => ({ post: initial, groundedInSearch: false })),
+      repair: vi.fn(async () => ({
+        patch: { sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }] } as RepairPatch,
+        groundedInSearch: false,
       })),
     });
 
@@ -80,7 +81,7 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("passes the repair call only the still-blocking failures, not every warning", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => badPost()) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })) });
     await runContentQualityPipeline(baseRequest(), provider).catch(() => {});
 
     const repairArgs = vi.mocked(provider.repair).mock.calls[0]?.[0];
@@ -90,8 +91,8 @@ describe("runContentQualityPipeline (integration)", () => {
 
   it("never makes more than 2 total Anthropic calls (1 generate + 1 repair), even when the repair doesn't fully fix things", async () => {
     const provider = fakeProvider({
-      generate: vi.fn(async () => badPost()),
-      repair: vi.fn(async (): Promise<RepairPatch> => ({})), // repair that changes nothing
+      generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })),
+      repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false })), // repair that changes nothing
     });
 
     await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(ContentQualityFailedError);
@@ -103,10 +104,13 @@ describe("runContentQualityPipeline (integration)", () => {
     // Repair fixes the semantic GENERIC_INTRO problem but introduces a
     // cosmetic issue (an unnecessary year in the title) along the way.
     const provider = fakeProvider({
-      generate: vi.fn(async () => badPost()),
-      repair: vi.fn(async (): Promise<RepairPatch> => ({
-        title: "Strong Password Security Practices: A Guide for 2024",
-        sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }],
+      generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })),
+      repair: vi.fn(async () => ({
+        patch: {
+          title: "Strong Password Security Practices: A Guide for 2024",
+          sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }],
+        } as RepairPatch,
+        groundedInSearch: false,
       })),
     });
 
@@ -117,13 +121,13 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("throws CONTENT_QUALITY_FAILED only after both the mechanical pass and the one repair call fail to resolve blocking issues", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => badPost()) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })) });
 
     await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(ContentQualityFailedError);
   });
 
   it("the thrown error carries the full report plus a minimal, curated public details payload", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => badPost()) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })) });
 
     try {
       await runContentQualityPipeline(baseRequest(), provider);
@@ -153,9 +157,10 @@ describe("runContentQualityPipeline (integration)", () => {
       ],
     };
     const provider = fakeProvider({
-      generate: vi.fn(async () => withFabricatedClaim),
-      repair: vi.fn(async (): Promise<RepairPatch> => ({
-        sections: [{ index: 1, contentMarkdown: base.sections[1]!.contentMarkdown }],
+      generate: vi.fn(async () => ({ post: withFabricatedClaim, groundedInSearch: false })),
+      repair: vi.fn(async () => ({
+        patch: { sections: [{ index: 1, contentMarkdown: base.sections[1]!.contentMarkdown }] } as RepairPatch,
+        groundedInSearch: false,
       })),
     });
 
@@ -168,11 +173,80 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("never lets factualityMode: 'verified' pass, and never spends the repair call trying to fix it", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => goodPost()) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false })) });
 
     await expect(
       runContentQualityPipeline(baseRequest({ factualityMode: "verified" }), provider)
     ).rejects.toBeInstanceOf(ContentQualityFailedError);
     expect(provider.repair).not.toHaveBeenCalled();
+  });
+
+  describe("freshness: ungrounded currency claims", () => {
+    // Extra "pricing" keyword makes the request freshness-sensitive while
+    // `topic` (and therefore primaryKeyword) stays "strong password", so
+    // keyword-coverage/depth/structure checks on goodPost() are unaffected —
+    // isolating the test to only the freshness claim, exactly like badPost().
+    const freshnessRequest = () => baseRequest({ keywords: ["strong password", "pricing"] });
+
+    // Identical to goodPost() except one body section states an unqualified
+    // current-state price claim.
+    const postWithUngroundedClaim = () => {
+      const base = goodPost();
+      return {
+        ...base,
+        sections: [
+          base.sections[0]!,
+          {
+            ...base.sections[1]!,
+            contentMarkdown:
+              "The leading password manager currently costs $29 per year for most users, though free tiers with reduced device limits are also common. Beyond the sticker price, it's worth weighing what each plan actually includes: unlimited device sync, encrypted file storage, family sharing seats, and breach-monitoring alerts all vary significantly between the free and paid tiers. For a household managing more than a handful of accounts, the paid tier's family sharing usually pays for itself within the first year simply by consolidating what would otherwise be several separate subscriptions.",
+          },
+          ...base.sections.slice(2),
+        ],
+      };
+    };
+
+    it("an ungrounded current-state claim on a freshness-sensitive topic triggers repair (not immediate failure), and a grounded patch passes", async () => {
+      const provider = fakeProvider({
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false })),
+        repair: vi.fn(async () => ({
+          patch: { sections: [{ index: 1, contentMarkdown: goodPost().sections[1]!.contentMarkdown }] } as RepairPatch,
+          groundedInSearch: true,
+        })),
+      });
+
+      const { report } = await runContentQualityPipeline(freshnessRequest(), provider);
+
+      expect(report.overallStatus).toBe("PASS");
+      expect(report.freshnessStatus).toBe("VERIFIED_CURRENT");
+      expect(provider.repair).toHaveBeenCalledTimes(1);
+      const repairArgs = vi.mocked(provider.repair).mock.calls[0]?.[0];
+      expect(repairArgs?.failedChecks.some((f) => f.code === "UNGROUNDED_CURRENCY_CLAIM")).toBe(true);
+    });
+
+    it("fails only after repair still can't ground the claim (never spends a 3rd call)", async () => {
+      const provider = fakeProvider({
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false })),
+        repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false })),
+      });
+
+      await expect(runContentQualityPipeline(freshnessRequest(), provider)).rejects.toBeInstanceOf(
+        ContentQualityFailedError
+      );
+      expect(provider.generate).toHaveBeenCalledTimes(1);
+      expect(provider.repair).toHaveBeenCalledTimes(1);
+    });
+
+    it("passes immediately (VERIFIED_CURRENT, no repair) when the first generation was already grounded", async () => {
+      const provider = fakeProvider({
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: true })),
+      });
+
+      const { report } = await runContentQualityPipeline(freshnessRequest(), provider);
+
+      expect(report.overallStatus).toBe("PASS");
+      expect(report.freshnessStatus).toBe("VERIFIED_CURRENT");
+      expect(provider.repair).not.toHaveBeenCalled();
+    });
   });
 });

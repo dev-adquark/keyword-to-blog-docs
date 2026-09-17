@@ -52,22 +52,25 @@ export class ContentQualityFailedError extends ApiError {
 }
 
 /**
- * FACTUALITY_UNVERIFIED / FRESHNESS_UNVERIFIED (blocking) mean the request
- * needs source verification this deployment cannot perform — no amount of
- * mechanical fixing or AI repair grants that capability, so the one repair
- * call is never spent chasing an unfixable capability gap.
+ * FACTUALITY_UNVERIFIED (blocking) means factualityMode: "verified" was
+ * requested for the whole request's factual claims broadly — a capability
+ * gap no amount of mechanical fixing or AI repair grants, so the one repair
+ * call is never spent chasing it. UNGROUNDED_CURRENCY_CLAIM is different: a
+ * real web_search-backed repair call CAN resolve it (see anthropic.ts), so
+ * it deliberately is NOT treated as unfixable here.
  */
 function isUnfixableByRepair(report: Omit<ContentQualityReport, "overallStatus">): boolean {
-  return report.failedChecks.some(
-    (f) => f.severity === "blocking" && (f.code === "FACTUALITY_UNVERIFIED" || f.code === "FRESHNESS_UNVERIFIED")
-  );
+  return report.failedChecks.some((f) => f.severity === "blocking" && f.code === "FACTUALITY_UNVERIFIED");
 }
 
-/** Runs every deterministic validator and folds the results into one report. */
+/** Runs every deterministic validator and folds the results into one report.
+ * `groundedInSearch` reflects whether the most recent generate/repair call
+ * actually returned a live web_search result — see freshness.ts. */
 async function validate(
   request: GenerateRequestV1,
   post: SEOPostV1,
-  revisionCount: number
+  revisionCount: number,
+  groundedInSearch: boolean
 ): Promise<Omit<ContentQualityReport, "overallStatus">> {
   const brief = buildContentBrief(request);
 
@@ -80,7 +83,7 @@ async function validate(
   const structure = evaluateStructure(post);
   const spam = evaluateSpamSignals(post, brief, request.language);
   const factuality = evaluateFactuality(request);
-  const freshness = evaluateFreshness(request, post);
+  const freshness = evaluateFreshness(request, post, groundedInSearch);
   const evidence = evaluateEvidenceClaims(request, post);
 
   return buildQualityReport({
@@ -122,8 +125,10 @@ export async function runContentQualityPipeline(
   const plan = buildSeoPlan(request, brief);
 
   // Anthropic call 1 of at most 2.
-  let post = finalizePost(await provider.generate(request, { brief, plan }), request);
-  let report = withStatus(await validate(request, post, 0));
+  const generated = await provider.generate(request, { brief, plan });
+  let post = finalizePost(generated.post, request);
+  let groundedInSearch = generated.groundedInSearch;
+  let report = withStatus(await validate(request, post, 0, groundedInSearch));
 
   if (report.overallStatus === "PASS") return { post, report };
   if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
@@ -134,7 +139,7 @@ export async function runContentQualityPipeline(
   const mechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
   if (mechanicalFix.appliedFixes.length > 0) {
     post = finalizePost(mechanicalFix.post, request);
-    report = withStatus(await validate(request, post, 0));
+    report = withStatus(await validate(request, post, 0, groundedInSearch));
     if (report.overallStatus === "PASS") return { post, report };
     if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
   }
@@ -143,9 +148,12 @@ export async function runContentQualityPipeline(
   // still blocking (semantic writing/depth/originality/keyword issues that
   // mechanical fixes genuinely can't rewrite prose for).
   const blockingFailures = report.failedChecks.filter((f) => f.severity === "blocking");
-  const patch = await provider.repair({ request, post, failedChecks: blockingFailures, context: { brief, plan } });
-  post = finalizePost(applyRepairPatch(post, patch), request);
-  report = withStatus(await validate(request, post, 1));
+  const repaired = await provider.repair({ request, post, failedChecks: blockingFailures, context: { brief, plan } });
+  post = finalizePost(applyRepairPatch(post, repaired.patch), request);
+  // The repair call may have grounded a currency claim the original
+  // generation didn't — carry that forward for the final freshness check.
+  groundedInSearch = groundedInSearch || repaired.groundedInSearch;
+  report = withStatus(await validate(request, post, 1, groundedInSearch));
 
   // One more free mechanical pass to mop up anything cosmetic the repair
   // call left behind or introduced — the "safest available fallback
@@ -153,7 +161,7 @@ export async function runContentQualityPipeline(
   const finalMechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
   if (finalMechanicalFix.appliedFixes.length > 0) {
     post = finalizePost(finalMechanicalFix.post, request);
-    report = withStatus(await validate(request, post, 1));
+    report = withStatus(await validate(request, post, 1, groundedInSearch));
   }
 
   if (report.overallStatus === "PASS") return { post, report };

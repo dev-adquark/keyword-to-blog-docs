@@ -1,12 +1,40 @@
 import "server-only";
-import type { FailedCheck, GenerateRequestV1, RepairPatch, SEOPostV1 } from "@/lib/types";
-import type { AIProvider, GenerationContext, RepairRequest } from "./provider";
+import type { FailedCheck, GenerateRequestV1, SEOPostV1 } from "@/lib/types";
+import type { AIProvider, GenerationContext, GenerateResult, RepairRequest, RepairResult } from "./provider";
 import { env } from "../env";
 import { seoPostSchema, repairPatchSchema } from "../validation";
 import { ApiError } from "../apiErrors";
+import { isFreshnessSensitive } from "../content-quality/freshness";
 
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 const REQUEST_TIMEOUT_MS = 45_000;
+
+/** FailedCheck codes that a targeted repair call can plausibly resolve by
+ * actually looking things up — enabling (billed) web search only when one of
+ * these is among the problems being repaired, never unconditionally. */
+const FRESHNESS_REPAIR_CODES = new Set(["UNGROUNDED_CURRENCY_CLAIM"]);
+
+/** Anthropic's server-side web search tool: the searches happen inside this
+ * one Messages API call (Claude can search multiple times in one turn), so
+ * enabling it never breaks the 2-Anthropic-calls-per-request budget (see
+ * engine.ts) — it's still exactly one HTTP call to /v1/messages. Capped via
+ * max_uses so a single request can't run away on search cost. */
+const WEB_SEARCH_TOOL_MAX_USES = 3;
+function webSearchTool(): Record<string, unknown> {
+  return { type: "web_search_20250305", name: "web_search", max_uses: WEB_SEARCH_TOOL_MAX_USES };
+}
+
+/** Real current date, injected into the per-request (uncached) user message
+ * — never into the cached `system` block, which must stay byte-identical
+ * across calls for prompt-cache hits to work (see cache_control below). This
+ * is the only way the model can know what "today"/"latest" actually means;
+ * previously no real clock value was ever given to it at all. */
+function currentDateContextLine(): string {
+  const now = new Date();
+  const iso = now.toISOString().slice(0, 10);
+  const human = new Intl.DateTimeFormat("en-US", { dateStyle: "full", timeZone: "UTC" }).format(now);
+  return `Today's real-world date is ${iso} (${human}, UTC). Use this — not your training data — to judge what is genuinely current, recent, or "the latest".`;
+}
 
 function contextGuidance(context?: GenerationContext): string {
   if (!context?.brief && !context?.plan) return "";
@@ -52,10 +80,13 @@ Respond with ONLY a JSON object matching exactly this TypeScript shape:
   "coverageNotes"?: { "keywordCoverage": Array<{ "keyword": string, "covered": boolean, "evidence": string }> }
 }
 
-Writing quality requirements: avoid generic openings ("in today's digital world", "in an increasingly..."), avoid generic closings ("in conclusion", "by following these tips"), avoid filler phrases ("it is important to note"), avoid restating the same point in different words, avoid keyword stuffing, and give concrete, specific guidance (real mechanisms, tradeoffs, and examples) rather than vague claims. Do not open more than one section with the same shallow "The [thing] is/lies/transforms..." construction — vary how each section starts. Do not repeat the same corporate buzzword (e.g. "seamless", "robust", "leverage") more than once or twice across the whole article. Never fabricate facts, sources, citations, statistics, or quotes, and never present a claim as independently verified, backed by "studies" or "experts", or as a precise guaranteed outcome (e.g. a specific percentage or a "consistently outperforms" claim) unless it is genuinely common, uncontroversial knowledge — when in doubt, phrase it as a general, hedged observation instead.`;
+Writing quality requirements: avoid generic openings ("in today's digital world", "in an increasingly..."), avoid generic closings ("in conclusion", "by following these tips"), avoid filler phrases ("it is important to note"), avoid restating the same point in different words, avoid keyword stuffing, and give concrete, specific guidance (real mechanisms, tradeoffs, and examples) rather than vague claims. Do not open more than one section with the same shallow "The [thing] is/lies/transforms..." construction — vary how each section starts. Do not repeat the same corporate buzzword (e.g. "seamless", "robust", "leverage") more than once or twice across the whole article. Never fabricate facts, sources, citations, statistics, or quotes, and never present a claim as independently verified, backed by "studies" or "experts", or as a precise guaranteed outcome (e.g. a specific percentage or a "consistently outperforms" claim) unless it is genuinely common, uncontroversial knowledge — when in doubt, phrase it as a general, hedged observation instead.
+
+Currency of information: the user message tells you today's real date. If a web_search tool is available to you, that means the topic was detected as time-sensitive (prices, versions, news, statistics, recent events, or anything that changes over time) — use it before writing, and base any current-state claim on what the search actually returned, not on your training data. Only ever state something as "the latest", "currently", "as of today/this year", or otherwise time-specific if either (a) it is genuinely stable, well-established knowledge that does not change, or (b) you have real, live web_search results from this same conversation confirming it. If no web_search tool is available, or a search didn't return a clear answer, do not guess a current date, price, version, or statistic — write general, evergreen guidance instead and avoid specific current-state claims entirely.`;
 
 function buildPrompt(req: GenerateRequestV1, context?: GenerationContext): string {
-  return `Keywords: ${req.keywords.join(", ")}
+  return `${currentDateContextLine()}
+Keywords: ${req.keywords.join(", ")}
 ${req.topic ? `Topic: ${req.topic}` : ""}
 Language: ${req.language}
 ${req.region ? `Region: ${req.region}` : ""}
@@ -90,6 +121,11 @@ Rules:
   agree"/"proven strategies" style claim with no real source, or a suspiciously precise outcome like "15-20
   minutes... consistently outperform"), REMOVE the fabricated specifics or SOFTEN the claim into an honest,
   general observation. Never invent a different fake number or source to replace it.
+- If a flagged problem is an ungrounded currency/recency claim (a stated price, version, statistic, or "as of
+  today"-style claim with no real backing), and a web_search tool is available to you, use it to find the real
+  current information and rewrite the claim to match. If no web_search tool is available, or it doesn't return a
+  clear answer, remove the specific current-state claim and rewrite it as general, timeless guidance instead —
+  never invent a date, number, or "latest" fact to replace it.
 - Do not fabricate facts, sources, citations, statistics, or quotes.
 - Do not fabricate URLs.
 - Keep the same language, tone, and overall length as the original.
@@ -110,7 +146,8 @@ function buildRepairPrompt(params: RepairRequest): string {
     .map((f) => `- [${f.code}]${f.section ? ` (section: "${f.section}")` : ""} ${f.message}`)
     .join("\n");
 
-  return `Original request:
+  return `${currentDateContextLine()}
+Original request:
 Keywords: ${request.keywords.join(", ")}
 ${request.topic ? `Topic: ${request.topic}` : ""}
 Language: ${request.language}
@@ -136,12 +173,22 @@ function extractJson(text: string): unknown {
 
 interface AnthropicCallResult {
   text: string;
-  usage: { inputTokens: number; outputTokens: number; cacheReadInputTokens: number; cacheCreationInputTokens: number };
+  /** True only if at least one web_search actually returned real (non-error,
+   * non-empty) results in this call — never merely because the tool was
+   * offered. See freshness.ts for why this distinction matters. */
+  groundedInSearch: boolean;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadInputTokens: number;
+    cacheCreationInputTokens: number;
+    webSearchRequests: number;
+  };
 }
 
 async function callAnthropicOnce(
   prompt: string,
-  opts: { maxTokens?: number; model?: string; system?: string } = {}
+  opts: { maxTokens?: number; model?: string; system?: string; tools?: Array<Record<string, unknown>> } = {}
 ): Promise<AnthropicCallResult> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
@@ -156,6 +203,9 @@ async function callAnthropicOnce(
       // every repair) call, so marking it as an ephemeral cache breakpoint
       // lets Anthropic skip re-processing it on cache hits within the TTL.
       body.system = [{ type: "text", text: opts.system, cache_control: { type: "ephemeral" } }];
+    }
+    if (opts.tools?.length) {
+      body.tools = opts.tools;
     }
 
     const response = await fetch(ANTHROPIC_API_URL, {
@@ -177,13 +227,14 @@ async function callAnthropicOnce(
     }
 
     const data = (await response.json()) as {
-      content: Array<{ type: string; text?: string }>;
+      content: Array<{ type: string; text?: string; content?: unknown }>;
       stop_reason?: string;
       usage?: {
         input_tokens?: number;
         output_tokens?: number;
         cache_read_input_tokens?: number;
         cache_creation_input_tokens?: number;
+        server_tool_use?: { web_search_requests?: number };
       };
     };
 
@@ -193,22 +244,42 @@ async function callAnthropicOnce(
       throw err;
     }
 
-    const textBlock = data.content.find((b) => b.type === "text");
+    if (data.stop_reason === "pause_turn") {
+      // A long-running search turn was paused mid-way; this deployment makes
+      // single-shot calls (no multi-turn continuation), so treat it as a
+      // transient hiccup worth retrying rather than parsing an incomplete
+      // response as final.
+      const err = new Error("Anthropic paused a long-running search turn");
+      (err as Error & { transient?: boolean }).transient = true;
+      throw err;
+    }
+
+    // With web search enabled, Claude may emit a short text block before
+    // deciding to search (e.g. "I'll look this up") in addition to its final
+    // answer — the LAST text block is the actual response, never the first.
+    const textBlocks = data.content.filter((b) => b.type === "text" && b.text);
+    const textBlock = textBlocks[textBlocks.length - 1];
     if (!textBlock?.text) {
       throw new Error("Anthropic response contained no text content");
     }
+
+    const groundedInSearch = data.content.some((b) => {
+      if (b.type !== "web_search_tool_result") return false;
+      return Array.isArray(b.content) && b.content.length > 0;
+    });
 
     const usage = {
       inputTokens: data.usage?.input_tokens ?? 0,
       outputTokens: data.usage?.output_tokens ?? 0,
       cacheReadInputTokens: data.usage?.cache_read_input_tokens ?? 0,
       cacheCreationInputTokens: data.usage?.cache_creation_input_tokens ?? 0,
+      webSearchRequests: data.usage?.server_tool_use?.web_search_requests ?? 0,
     };
     // Internal token-usage tracking (never exposed publicly) — useful for
     // cost observability and confirming prompt caching is actually hitting.
-    console.info(JSON.stringify({ level: "info", message: "anthropic_call_usage", ...usage }));
+    console.info(JSON.stringify({ level: "info", message: "anthropic_call_usage", ...usage, groundedInSearch }));
 
-    return { text: textBlock.text, usage };
+    return { text: textBlock.text, groundedInSearch, usage };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       const timeoutErr = new Error("Anthropic API request timed out");
@@ -244,26 +315,37 @@ function maxTokensForRepair(failedChecks: FailedCheck[], post: SEOPostV1): numbe
 }
 
 export class AnthropicProvider implements AIProvider {
-  async generate(request: GenerateRequestV1, context?: GenerationContext): Promise<SEOPostV1> {
-    return runWithRetries({
+  async generate(request: GenerateRequestV1, context?: GenerationContext): Promise<GenerateResult> {
+    // Only pay for (and offer) web search when the topic actually looks
+    // freshness-sensitive — see freshness.ts for the shared heuristic.
+    const tools = isFreshnessSensitive(request) ? [webSearchTool()] : undefined;
+    const { data, groundedInSearch } = await runWithRetries({
       prompt: buildPrompt(request, context),
       system: STABLE_GENERATION_SYSTEM_PROMPT,
       maxTokens: maxTokensForWordBudget(request.constraints.maxWords),
+      tools,
       schema: seoPostSchema,
       schemaFailureMessage: "generation_schema_validation_failed",
       finalFailureMessage: "generation_provider_failure",
     });
+    return { post: data, groundedInSearch };
   }
 
-  async repair(params: RepairRequest): Promise<RepairPatch> {
-    return runWithRetries({
+  async repair(params: RepairRequest): Promise<RepairResult> {
+    // Only enable search for the repair call if one of the still-blocking
+    // problems is actually a freshness/currency issue — never spend it on
+    // writing-quality-only repairs.
+    const tools = params.failedChecks.some((f) => FRESHNESS_REPAIR_CODES.has(f.code)) ? [webSearchTool()] : undefined;
+    const { data, groundedInSearch } = await runWithRetries({
       prompt: buildRepairPrompt(params),
       system: STABLE_REPAIR_SYSTEM_PROMPT,
       maxTokens: maxTokensForRepair(params.failedChecks, params.post),
+      tools,
       schema: repairPatchSchema,
       schemaFailureMessage: "repair_schema_validation_failed",
       finalFailureMessage: "repair_provider_failure",
     });
+    return { patch: data, groundedInSearch };
   }
 }
 
@@ -282,17 +364,19 @@ async function runWithRetries<T>(params: {
   prompt: string;
   system: string;
   maxTokens: number;
+  tools?: Array<Record<string, unknown>>;
   schema: { safeParse: (data: unknown) => { success: boolean; data?: T; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } };
   schemaFailureMessage: string;
   finalFailureMessage: string;
-}): Promise<T> {
+}): Promise<{ data: T; groundedInSearch: boolean }> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const { text } = await callAnthropicOnce(params.prompt, {
+      const { text, groundedInSearch } = await callAnthropicOnce(params.prompt, {
         maxTokens: params.maxTokens,
         system: params.system,
+        tools: params.tools,
       });
       const parsed = extractJson(text);
       const result = params.schema.safeParse(parsed);
@@ -309,7 +393,7 @@ async function runWithRetries<T>(params: {
         (validationErr as Error & { transient?: boolean }).transient = true;
         throw validationErr;
       }
-      return result.data as T;
+      return { data: result.data as T, groundedInSearch };
     } catch (err) {
       if (err instanceof Error && (err as Error & { prohibited?: boolean }).prohibited) {
         throw new ApiError(

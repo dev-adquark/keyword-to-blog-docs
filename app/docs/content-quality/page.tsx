@@ -26,7 +26,7 @@ const CHECK_CATEGORIES = [
   { name: "Structure", detail: "Section ordering and shape beyond what the JSON schema alone enforces." },
   { name: "Spam signals", detail: "Keyword-stuffed headings and pushy commercial language out of place in informational content." },
   { name: "Factuality", detail: "See below — standard vs. verified mode." },
-  { name: "Freshness", detail: "See below — detects freshness-sensitive topics." },
+  { name: "Freshness", detail: "See below — grounds freshness-sensitive topics in live web search." },
 ];
 
 export default function ContentQualityPage() {
@@ -90,11 +90,15 @@ export default function ContentQualityPage() {
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Freshness-sensitive topics</h2>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
-          Topics touching prices, software versions, laws, regulations, or current statistics are detected
-          automatically. The pipeline never invents &ldquo;the latest&rdquo; information — it asks for hedged,
-          general-guidance phrasing instead of unqualified current-state claims. Combined with{" "}
-          <code className="font-mono">factualityMode: &quot;verified&quot;</code>, an unqualified current-state
-          claim on a freshness-sensitive topic blocks the response instead.
+          Topics touching prices, software versions, laws, regulations, current statistics, or recent events are
+          detected automatically. For these requests only, the model is given real-time web search and today&rsquo;s
+          actual date, and is instructed to ground any current-state claim in what it actually finds rather than its
+          training data. A current-state claim (a stated price, version, or &ldquo;as of today&rdquo;-style
+          assertion) that is <em>not</em> backed by a real search result from that same call is never returned
+          silently — it is treated as a genuine quality failure and goes through the same automatic repair step
+          (with search enabled) as any other blocking issue, or is rewritten as general, hedged guidance if a clear
+          answer still isn&rsquo;t found. The pipeline never invents a date, price, or &ldquo;latest&rdquo; fact to
+          make a response look current.
         </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">What you see in the response</h2>

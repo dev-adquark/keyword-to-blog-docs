@@ -47,7 +47,12 @@ export interface RevisionFeedback {
 }
 
 export type FactualityStatus = "STANDARD_UNVERIFIED" | "VERIFICATION_UNAVAILABLE";
-export type FreshnessStatus = "NOT_APPLICABLE" | "UNVERIFIED_ACCEPTABLE" | "UNVERIFIED_BLOCKED";
+/** VERIFIED_CURRENT means the claim was actually grounded in a live web_search
+ * result from this same generation/repair call (see freshness.ts) — not
+ * merely "no problems detected". UNVERIFIED_BLOCKED now applies regardless of
+ * factualityMode, since real grounding is available; it's no longer a
+ * capability gap that skips repair (see engine.ts's isUnfixableByRepair). */
+export type FreshnessStatus = "NOT_APPLICABLE" | "VERIFIED_CURRENT" | "UNVERIFIED_ACCEPTABLE" | "UNVERIFIED_BLOCKED";
 /** Only two outcomes now — see lib/server/content-quality/qualityGate.ts:
  * any blocking failedCheck fails the gate, everything else passes. There is
  * no longer an intermediate "keep looping" status; the engine sequences a
