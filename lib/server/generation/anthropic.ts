@@ -36,6 +36,43 @@ function currentDateContextLine(): string {
   return `Today's real-world date is ${iso} (${human}, UTC). Use this — not your training data — to judge what is genuinely current, recent, or "the latest".`;
 }
 
+/** Anthropic's web_search_result objects carry a `page_age` string describing
+ * when the source was last updated — never a fixed format ("today", "3
+ * hours ago", or an explicit date like "September 18, 2026"). Per the strict
+ * freshness policy, a source counts as verified-current ONLY when its
+ * page_age can be confirmed as TODAY's real calendar date — yesterday, an
+ * older explicit date, or anything unparseable/absent is treated as NOT
+ * today. There is no "close enough" fallback: never yesterday, never older. */
+function isPageAgeToday(pageAge: string | undefined, now: Date): boolean {
+  if (!pageAge) return false;
+  const normalized = pageAge.trim().toLowerCase();
+  if (/^today\b/.test(normalized)) return true;
+  if (/^\d+\s*(?:second|minute|hour)s?\s+ago$/.test(normalized)) return true;
+  const parsed = new Date(pageAge);
+  if (Number.isNaN(parsed.getTime())) return false;
+  // Compare calendar-date components directly (not via toISOString, which
+  // converts to UTC and can shift an unqualified date like "September 18,
+  // 2026" — parsed as local midnight — onto a different UTC calendar day).
+  return (
+    parsed.getFullYear() === now.getFullYear() &&
+    parsed.getMonth() === now.getMonth() &&
+    parsed.getDate() === now.getDate()
+  );
+}
+
+function extractPageAges(content: Array<{ type: string; content?: unknown }>): string[] {
+  const ages: string[] = [];
+  for (const block of content) {
+    if (block.type !== "web_search_tool_result" || !Array.isArray(block.content)) continue;
+    for (const item of block.content) {
+      if (item && typeof item === "object" && typeof (item as { page_age?: unknown }).page_age === "string") {
+        ages.push((item as { page_age: string }).page_age);
+      }
+    }
+  }
+  return ages;
+}
+
 function contextGuidance(context?: GenerationContext): string {
   if (!context?.brief && !context?.plan) return "";
   const { brief, plan } = context;
@@ -82,7 +119,7 @@ Respond with ONLY a JSON object matching exactly this TypeScript shape:
 
 Writing quality requirements: avoid generic openings ("in today's digital world", "in an increasingly..."), avoid generic closings ("in conclusion", "by following these tips"), avoid filler phrases ("it is important to note"), avoid restating the same point in different words, avoid keyword stuffing, and give concrete, specific guidance (real mechanisms, tradeoffs, and examples) rather than vague claims. Do not open more than one section with the same shallow "The [thing] is/lies/transforms..." construction — vary how each section starts. Do not repeat the same corporate buzzword (e.g. "seamless", "robust", "leverage") more than once or twice across the whole article. Never fabricate facts, sources, citations, statistics, or quotes, and never present a claim as independently verified, backed by "studies" or "experts", or as a precise guaranteed outcome (e.g. a specific percentage or a "consistently outperforms" claim) unless it is genuinely common, uncontroversial knowledge — when in doubt, phrase it as a general, hedged observation instead.
 
-Currency of information: the user message tells you today's real date. If a web_search tool is available to you, that means the topic was detected as time-sensitive (prices, versions, news, statistics, recent events, or anything that changes over time) — use it before writing, and base any current-state claim on what the search actually returned, not on your training data. Only ever state something as "the latest", "currently", "as of today/this year", or otherwise time-specific if either (a) it is genuinely stable, well-established knowledge that does not change, or (b) you have real, live web_search results from this same conversation confirming it. If no web_search tool is available, or a search didn't return a clear answer, do not guess a current date, price, version, or statistic — write general, evergreen guidance instead and avoid specific current-state claims entirely.`;
+Currency of information: the user message tells you today's real date. If a web_search tool is available to you, that means the topic was detected as time-sensitive (prices, versions, news, statistics, recent events, or anything that changes over time) — using it before writing any current-state claim is MANDATORY, not optional. Check each search result's recency (its page age / published date) before relying on it: only ever state something as "the latest", "currently", "as of today", or otherwise time-specific if either (a) it is genuinely stable, well-established knowledge that never changes, or (b) you have a live web_search result from this same conversation that is genuinely dated to TODAY. A source from yesterday or earlier does NOT count as current — never present it as today's information, and never invent a more recent date to make it look current. If no web_search tool is available, or no result confirmed as published today exists, do not guess a current date, price, version, or statistic — write general, evergreen guidance instead, or say plainly that verified up-to-date information wasn't found, rather than presenting older information as current.`;
 
 function buildPrompt(req: GenerateRequestV1, context?: GenerationContext): string {
   return `${currentDateContextLine()}
@@ -121,11 +158,12 @@ Rules:
   agree"/"proven strategies" style claim with no real source, or a suspiciously precise outcome like "15-20
   minutes... consistently outperform"), REMOVE the fabricated specifics or SOFTEN the claim into an honest,
   general observation. Never invent a different fake number or source to replace it.
-- If a flagged problem is an ungrounded currency/recency claim (a stated price, version, statistic, or "as of
-  today"-style claim with no real backing), and a web_search tool is available to you, use it to find the real
-  current information and rewrite the claim to match. If no web_search tool is available, or it doesn't return a
-  clear answer, remove the specific current-state claim and rewrite it as general, timeless guidance instead —
-  never invent a date, number, or "latest" fact to replace it.
+- If a flagged problem is an ungrounded or stale currency/recency claim (a stated price, version, statistic, or "as
+  of today"-style claim with no real backing), use the web_search tool (if available) to find the real current
+  information — and only rely on a result genuinely dated to TODAY. A result from yesterday or earlier does not
+  count as current. If the best you find is not from today, or no web_search tool is available, remove the
+  specific current-state claim and rewrite it as general, timeless guidance instead — never present older
+  information as current, and never invent a date, number, or "latest" fact to replace it.
 - Do not fabricate facts, sources, citations, statistics, or quotes.
 - Do not fabricate URLs.
 - Keep the same language, tone, and overall length as the original.
@@ -175,8 +213,14 @@ interface AnthropicCallResult {
   text: string;
   /** True only if at least one web_search actually returned real (non-error,
    * non-empty) results in this call — never merely because the tool was
-   * offered. See freshness.ts for why this distinction matters. */
+   * offered. This alone is NOT enough to trust a currency claim — see
+   * `groundedInTodaySource` and freshness.ts. */
   groundedInSearch: boolean;
+  /** True only if at least one of those results is verified (via its
+   * page_age) as published TODAY — the strict bar freshness.ts actually
+   * gates on. A search that only turned up yesterday's or older sources
+   * still leaves this false. */
+  groundedInTodaySource: boolean;
   usage: {
     inputTokens: number;
     outputTokens: number;
@@ -254,12 +298,23 @@ async function callAnthropicOnce(
       throw err;
     }
 
-    // With web search enabled, Claude may emit a short text block before
-    // deciding to search (e.g. "I'll look this up") in addition to its final
-    // answer — the LAST text block is the actual response, never the first.
-    const textBlocks = data.content.filter((b) => b.type === "text" && b.text);
-    const textBlock = textBlocks[textBlocks.length - 1];
-    if (!textBlock?.text) {
+    // With web search enabled, Claude may emit narration text before/between
+    // tool calls (e.g. "I'll look this up") — never part of the final
+    // answer. Worse, citations are always attached to web-search-grounded
+    // content, and Anthropic splits the final answer into MULTIPLE separate
+    // consecutive text blocks at citation boundaries (see their web search
+    // docs' own example: "Based on the search results, " and "Claude Shannon
+    // was born..." arrive as two separate text blocks, not one) — so taking
+    // only a single block (whether first or last) silently truncates the
+    // JSON. The correct final answer is every text block after the last
+    // tool-related block, concatenated in order; with no tool use at all,
+    // that's simply every text block (normally just one).
+    const lastNonTextIndex = data.content.reduce((acc, b, i) => (b.type !== "text" ? i : acc), -1);
+    const finalText = data.content
+      .filter((b, i) => i > lastNonTextIndex && b.type === "text" && b.text)
+      .map((b) => b.text)
+      .join("");
+    if (!finalText) {
       throw new Error("Anthropic response contained no text content");
     }
 
@@ -267,6 +322,8 @@ async function callAnthropicOnce(
       if (b.type !== "web_search_tool_result") return false;
       return Array.isArray(b.content) && b.content.length > 0;
     });
+    const now = new Date();
+    const groundedInTodaySource = extractPageAges(data.content).some((age) => isPageAgeToday(age, now));
 
     const usage = {
       inputTokens: data.usage?.input_tokens ?? 0,
@@ -277,9 +334,11 @@ async function callAnthropicOnce(
     };
     // Internal token-usage tracking (never exposed publicly) — useful for
     // cost observability and confirming prompt caching is actually hitting.
-    console.info(JSON.stringify({ level: "info", message: "anthropic_call_usage", ...usage, groundedInSearch }));
+    console.info(
+      JSON.stringify({ level: "info", message: "anthropic_call_usage", ...usage, groundedInSearch, groundedInTodaySource })
+    );
 
-    return { text: textBlock.text, groundedInSearch, usage };
+    return { text: finalText, groundedInSearch, groundedInTodaySource, usage };
   } catch (err) {
     if (err instanceof Error && err.name === "AbortError") {
       const timeoutErr = new Error("Anthropic API request timed out");
@@ -319,7 +378,7 @@ export class AnthropicProvider implements AIProvider {
     // Only pay for (and offer) web search when the topic actually looks
     // freshness-sensitive — see freshness.ts for the shared heuristic.
     const tools = isFreshnessSensitive(request) ? [webSearchTool()] : undefined;
-    const { data, groundedInSearch } = await runWithRetries({
+    const { data, groundedInSearch, groundedInTodaySource } = await runWithRetries({
       prompt: buildPrompt(request, context),
       system: STABLE_GENERATION_SYSTEM_PROMPT,
       maxTokens: maxTokensForWordBudget(request.constraints.maxWords),
@@ -328,7 +387,7 @@ export class AnthropicProvider implements AIProvider {
       schemaFailureMessage: "generation_schema_validation_failed",
       finalFailureMessage: "generation_provider_failure",
     });
-    return { post: data, groundedInSearch };
+    return { post: data, groundedInSearch, groundedInTodaySource };
   }
 
   async repair(params: RepairRequest): Promise<RepairResult> {
@@ -336,7 +395,7 @@ export class AnthropicProvider implements AIProvider {
     // problems is actually a freshness/currency issue — never spend it on
     // writing-quality-only repairs.
     const tools = params.failedChecks.some((f) => FRESHNESS_REPAIR_CODES.has(f.code)) ? [webSearchTool()] : undefined;
-    const { data, groundedInSearch } = await runWithRetries({
+    const { data, groundedInSearch, groundedInTodaySource } = await runWithRetries({
       prompt: buildRepairPrompt(params),
       system: STABLE_REPAIR_SYSTEM_PROMPT,
       maxTokens: maxTokensForRepair(params.failedChecks, params.post),
@@ -345,7 +404,7 @@ export class AnthropicProvider implements AIProvider {
       schemaFailureMessage: "repair_schema_validation_failed",
       finalFailureMessage: "repair_provider_failure",
     });
-    return { patch: data, groundedInSearch };
+    return { patch: data, groundedInSearch, groundedInTodaySource };
   }
 }
 
@@ -368,12 +427,12 @@ async function runWithRetries<T>(params: {
   schema: { safeParse: (data: unknown) => { success: boolean; data?: T; error?: { issues: Array<{ path: PropertyKey[]; message: string }> } } };
   schemaFailureMessage: string;
   finalFailureMessage: string;
-}): Promise<{ data: T; groundedInSearch: boolean }> {
+}): Promise<{ data: T; groundedInSearch: boolean; groundedInTodaySource: boolean }> {
   let lastError: unknown;
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const { text, groundedInSearch } = await callAnthropicOnce(params.prompt, {
+      const { text, groundedInSearch, groundedInTodaySource } = await callAnthropicOnce(params.prompt, {
         maxTokens: params.maxTokens,
         system: params.system,
         tools: params.tools,
@@ -393,7 +452,7 @@ async function runWithRetries<T>(params: {
         (validationErr as Error & { transient?: boolean }).transient = true;
         throw validationErr;
       }
-      return { data: result.data as T, groundedInSearch };
+      return { data: result.data as T, groundedInSearch, groundedInTodaySource };
     } catch (err) {
       if (err instanceof Error && (err as Error & { prohibited?: boolean }).prohibited) {
         throw new ApiError(

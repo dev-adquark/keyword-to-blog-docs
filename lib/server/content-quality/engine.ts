@@ -64,13 +64,14 @@ function isUnfixableByRepair(report: Omit<ContentQualityReport, "overallStatus">
 }
 
 /** Runs every deterministic validator and folds the results into one report.
- * `groundedInSearch` reflects whether the most recent generate/repair call
- * actually returned a live web_search result — see freshness.ts. */
+ * `grounding` reflects whether the most recent generate/repair call actually
+ * returned a live web_search result, and whether one of those results was
+ * verified as published TODAY — see freshness.ts. */
 async function validate(
   request: GenerateRequestV1,
   post: SEOPostV1,
   revisionCount: number,
-  groundedInSearch: boolean
+  grounding: { groundedInSearch: boolean; groundedInTodaySource: boolean }
 ): Promise<Omit<ContentQualityReport, "overallStatus">> {
   const brief = buildContentBrief(request);
 
@@ -83,7 +84,7 @@ async function validate(
   const structure = evaluateStructure(post);
   const spam = evaluateSpamSignals(post, brief, request.language);
   const factuality = evaluateFactuality(request);
-  const freshness = evaluateFreshness(request, post, groundedInSearch);
+  const freshness = evaluateFreshness(request, post, grounding);
   const evidence = evaluateEvidenceClaims(request, post);
 
   return buildQualityReport({
@@ -127,8 +128,8 @@ export async function runContentQualityPipeline(
   // Anthropic call 1 of at most 2.
   const generated = await provider.generate(request, { brief, plan });
   let post = finalizePost(generated.post, request);
-  let groundedInSearch = generated.groundedInSearch;
-  let report = withStatus(await validate(request, post, 0, groundedInSearch));
+  let grounding = { groundedInSearch: generated.groundedInSearch, groundedInTodaySource: generated.groundedInTodaySource };
+  let report = withStatus(await validate(request, post, 0, grounding));
 
   if (report.overallStatus === "PASS") return { post, report };
   if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
@@ -139,7 +140,7 @@ export async function runContentQualityPipeline(
   const mechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
   if (mechanicalFix.appliedFixes.length > 0) {
     post = finalizePost(mechanicalFix.post, request);
-    report = withStatus(await validate(request, post, 0, groundedInSearch));
+    report = withStatus(await validate(request, post, 0, grounding));
     if (report.overallStatus === "PASS") return { post, report };
     if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
   }
@@ -150,10 +151,14 @@ export async function runContentQualityPipeline(
   const blockingFailures = report.failedChecks.filter((f) => f.severity === "blocking");
   const repaired = await provider.repair({ request, post, failedChecks: blockingFailures, context: { brief, plan } });
   post = finalizePost(applyRepairPatch(post, repaired.patch), request);
-  // The repair call may have grounded a currency claim the original
-  // generation didn't — carry that forward for the final freshness check.
-  groundedInSearch = groundedInSearch || repaired.groundedInSearch;
-  report = withStatus(await validate(request, post, 1, groundedInSearch));
+  // The repair call may have grounded a currency claim (in a today-dated
+  // source) that the original generation didn't — carry that forward for
+  // the final freshness check.
+  grounding = {
+    groundedInSearch: grounding.groundedInSearch || repaired.groundedInSearch,
+    groundedInTodaySource: grounding.groundedInTodaySource || repaired.groundedInTodaySource,
+  };
+  report = withStatus(await validate(request, post, 1, grounding));
 
   // One more free mechanical pass to mop up anything cosmetic the repair
   // call left behind or introduced — the "safest available fallback
@@ -161,7 +166,7 @@ export async function runContentQualityPipeline(
   const finalMechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
   if (finalMechanicalFix.appliedFixes.length > 0) {
     post = finalizePost(finalMechanicalFix.post, request);
-    report = withStatus(await validate(request, post, 1, groundedInSearch));
+    report = withStatus(await validate(request, post, 1, grounding));
   }
 
   if (report.overallStatus === "PASS") return { post, report };

@@ -92,13 +92,15 @@ export default function ContentQualityPage() {
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
           Topics touching prices, software versions, laws, regulations, current statistics, or recent events are
           detected automatically. For these requests only, the model is given real-time web search and today&rsquo;s
-          actual date, and is instructed to ground any current-state claim in what it actually finds rather than its
-          training data. A current-state claim (a stated price, version, or &ldquo;as of today&rdquo;-style
-          assertion) that is <em>not</em> backed by a real search result from that same call is never returned
-          silently — it is treated as a genuine quality failure and goes through the same automatic repair step
-          (with search enabled) as any other blocking issue, or is rewritten as general, hedged guidance if a clear
-          answer still isn&rsquo;t found. The pipeline never invents a date, price, or &ldquo;latest&rdquo; fact to
-          make a response look current.
+          actual date, and using search before writing any current-state claim is mandatory. The bar is strict: a
+          claim only counts as verified if a search result&rsquo;s own recency (its page age or published date) can
+          be confirmed as <strong>today</strong> — a source from yesterday or earlier never counts as current, and
+          is treated exactly like no source at all. A current-state claim (a stated price, version, or &ldquo;as of
+          today&rdquo;-style assertion) that isn&rsquo;t backed by a today-dated result is never returned silently —
+          it is treated as a genuine quality failure and goes through the same automatic repair step (with search
+          enabled) as any other blocking issue, or is rewritten as general, hedged guidance if a clear, today-dated
+          answer still isn&rsquo;t found. The pipeline never invents a date, price, or &ldquo;latest&rdquo; fact, and
+          never presents older information as if it were current.
         </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">What you see in the response</h2>

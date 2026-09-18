@@ -16,17 +16,22 @@ export interface RepairRequest {
 
 /** `groundedInSearch` is true only when the call actually returned at least
  * one non-empty live web_search result — never merely because the tool was
- * offered. This is what lets freshness.ts distinguish real, live-grounded
- * current-state claims from the model asserting recency on its own say-so
- * (see lib/server/content-quality/freshness.ts). */
+ * offered. `groundedInTodaySource` is the stricter bar freshness.ts actually
+ * gates on: true only if one of those results is verified (via its
+ * page_age) as published TODAY — a search that only turned up yesterday's or
+ * older sources still leaves this false, per the strict "never present
+ * yesterday-or-older information as current" policy (see
+ * lib/server/content-quality/freshness.ts). */
 export interface GenerateResult {
   post: SEOPostV1;
   groundedInSearch: boolean;
+  groundedInTodaySource: boolean;
 }
 
 export interface RepairResult {
   patch: RepairPatch;
   groundedInSearch: boolean;
+  groundedInTodaySource: boolean;
 }
 
 export interface AIProvider {

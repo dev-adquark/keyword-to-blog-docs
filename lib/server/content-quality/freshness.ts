@@ -12,11 +12,13 @@ import { collectSectionProse } from "./textStats";
  * generation/repair call (see lib/server/generation/anthropic.ts). So the
  * question this file answers is no longer "did the model hedge enough
  * wording?" — it's "was this specific current-state claim actually backed by
- * a real search this call, or is it the model asserting recency on its own
- * say-so?" Only the latter is ever blocked; it is blocked unconditionally
- * (not only in factualityMode: "verified") because there is no honest reason
- * to let an ungrounded currency claim through by default when grounding is
- * genuinely available.
+ * a search result verified as published TODAY?" Per the strict freshness
+ * policy, a source from yesterday or earlier does NOT count — there is no
+ * "close enough" fallback. Only a claim genuinely grounded in a today-dated
+ * source passes; everything else is blocked unconditionally (not only in
+ * factualityMode: "verified"), because there is no honest reason to let an
+ * ungrounded or stale currency claim through by default when real,
+ * date-verified grounding is available.
  */
 export interface FreshnessResult {
   status: FreshnessStatus;
@@ -72,7 +74,7 @@ export function isFreshnessSensitive(request: GenerateRequestV1): boolean {
 export function evaluateFreshness(
   request: GenerateRequestV1,
   post: SEOPostV1,
-  groundedInSearch: boolean
+  grounding: { groundedInSearch: boolean; groundedInTodaySource: boolean }
 ): FreshnessResult {
   if (!isFreshnessSensitive(request)) {
     return { status: "NOT_APPLICABLE", failedChecks: [], warnings: [] };
@@ -82,22 +84,26 @@ export function evaluateFreshness(
   const unqualifiedClaims = UNQUALIFIED_CURRENT_CLAIM_PATTERNS.filter((p) => p.test(allText));
 
   if (unqualifiedClaims.length === 0) {
-    return groundedInSearch
+    return grounding.groundedInTodaySource
       ? { status: "VERIFIED_CURRENT", failedChecks: [], warnings: [] }
       : {
           status: "UNVERIFIED_ACCEPTABLE",
           failedChecks: [],
           warnings: [
-            "Freshness-sensitive topic: content avoided unqualified current-state claims. No live web search was performed or needed.",
+            "Freshness-sensitive topic: content avoided unqualified current-state claims. No source verified as published today was needed or found.",
           ],
         };
   }
 
-  if (groundedInSearch) {
-    // The model made a current-state claim, but this call actually performed
-    // a live web search that returned real results — trust it.
+  if (grounding.groundedInTodaySource) {
+    // The model made a current-state claim, and this call actually returned
+    // a live web_search result verified as published TODAY — trust it.
     return { status: "VERIFIED_CURRENT", failedChecks: [], warnings: [] };
   }
+
+  const searchNote = grounding.groundedInSearch
+    ? "a web search was performed, but none of the results could be verified as published today (yesterday or older does not count)"
+    : "no live web search backed it up at all";
 
   return {
     status: "UNVERIFIED_BLOCKED",
@@ -105,8 +111,7 @@ export function evaluateFreshness(
       {
         code: "UNGROUNDED_CURRENCY_CLAIM",
         severity: "blocking",
-        message:
-          "This topic is freshness-sensitive (prices/versions/regulations/recent events/etc.) and the content states current information as fact (e.g. \"currently costs\", \"the latest version is\", \"as of today\"), but no live web search backed it up. Either ground the claim in a real, current web_search result or rewrite it as general, hedged guidance without a specific current-state assertion.",
+        message: `This topic is freshness-sensitive (prices/versions/regulations/recent events/etc.) and the content states current information as fact (e.g. "currently costs", "the latest version is", "as of today"), but ${searchNote}. Per policy, only information verified as published today may be presented as current — never yesterday's or older information. Either ground the claim in a web_search result confirmed as published today, or rewrite it as general, hedged guidance without a specific current-state assertion.`,
       },
     ],
     warnings: [],

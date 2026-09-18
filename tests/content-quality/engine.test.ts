@@ -25,8 +25,8 @@ const badPost = () => {
 
 function fakeProvider(overrides: Partial<AIProvider> = {}): AIProvider {
   return {
-    generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false })),
-    repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false })),
+    generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false, groundedInTodaySource: false })),
+    repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false, groundedInTodaySource: false })),
     ...overrides,
   };
 }
@@ -37,7 +37,7 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("passes immediately when the first generation is already good — zero AI calls beyond generate", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false })) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false, groundedInTodaySource: false })) });
 
     const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
 
@@ -50,7 +50,7 @@ describe("runContentQualityPipeline (integration)", () => {
 
   it("fixes a mechanically-fixable problem (bad slug) for free — never calls repair", async () => {
     const provider = fakeProvider({
-      generate: vi.fn(async () => ({ post: goodPost({ slugSuggestion: "Not A Valid Slug!!" }), groundedInSearch: false })),
+      generate: vi.fn(async () => ({ post: goodPost({ slugSuggestion: "Not A Valid Slug!!" }), groundedInSearch: false, groundedInTodaySource: false })),
     });
 
     const { post, report } = await runContentQualityPipeline(baseRequest(), provider);
@@ -63,10 +63,11 @@ describe("runContentQualityPipeline (integration)", () => {
   it("uses exactly ONE targeted repair call for a semantic issue, merges the patch, and preserves untouched sections", async () => {
     const initial = badPost();
     const provider = fakeProvider({
-      generate: vi.fn(async () => ({ post: initial, groundedInSearch: false })),
+      generate: vi.fn(async () => ({ post: initial, groundedInSearch: false, groundedInTodaySource: false })),
       repair: vi.fn(async () => ({
         patch: { sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }] } as RepairPatch,
         groundedInSearch: false,
+          groundedInTodaySource: false,
       })),
     });
 
@@ -81,7 +82,7 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("passes the repair call only the still-blocking failures, not every warning", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false, groundedInTodaySource: false })) });
     await runContentQualityPipeline(baseRequest(), provider).catch(() => {});
 
     const repairArgs = vi.mocked(provider.repair).mock.calls[0]?.[0];
@@ -91,8 +92,8 @@ describe("runContentQualityPipeline (integration)", () => {
 
   it("never makes more than 2 total Anthropic calls (1 generate + 1 repair), even when the repair doesn't fully fix things", async () => {
     const provider = fakeProvider({
-      generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })),
-      repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false })), // repair that changes nothing
+      generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false, groundedInTodaySource: false })),
+      repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false, groundedInTodaySource: false })), // repair that changes nothing
     });
 
     await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(ContentQualityFailedError);
@@ -104,13 +105,14 @@ describe("runContentQualityPipeline (integration)", () => {
     // Repair fixes the semantic GENERIC_INTRO problem but introduces a
     // cosmetic issue (an unnecessary year in the title) along the way.
     const provider = fakeProvider({
-      generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })),
+      generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false, groundedInTodaySource: false })),
       repair: vi.fn(async () => ({
         patch: {
           title: "Strong Password Security Practices: A Guide for 2024",
           sections: [{ index: 0, contentMarkdown: goodPost().sections[0]!.contentMarkdown }],
         } as RepairPatch,
         groundedInSearch: false,
+          groundedInTodaySource: false,
       })),
     });
 
@@ -121,13 +123,13 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("throws CONTENT_QUALITY_FAILED only after both the mechanical pass and the one repair call fail to resolve blocking issues", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false, groundedInTodaySource: false })) });
 
     await expect(runContentQualityPipeline(baseRequest(), provider)).rejects.toBeInstanceOf(ContentQualityFailedError);
   });
 
   it("the thrown error carries the full report plus a minimal, curated public details payload", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false })) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: badPost(), groundedInSearch: false, groundedInTodaySource: false })) });
 
     try {
       await runContentQualityPipeline(baseRequest(), provider);
@@ -157,10 +159,11 @@ describe("runContentQualityPipeline (integration)", () => {
       ],
     };
     const provider = fakeProvider({
-      generate: vi.fn(async () => ({ post: withFabricatedClaim, groundedInSearch: false })),
+      generate: vi.fn(async () => ({ post: withFabricatedClaim, groundedInSearch: false, groundedInTodaySource: false })),
       repair: vi.fn(async () => ({
         patch: { sections: [{ index: 1, contentMarkdown: base.sections[1]!.contentMarkdown }] } as RepairPatch,
         groundedInSearch: false,
+          groundedInTodaySource: false,
       })),
     });
 
@@ -173,7 +176,7 @@ describe("runContentQualityPipeline (integration)", () => {
   });
 
   it("never lets factualityMode: 'verified' pass, and never spends the repair call trying to fix it", async () => {
-    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false })) });
+    const provider = fakeProvider({ generate: vi.fn(async () => ({ post: goodPost(), groundedInSearch: false, groundedInTodaySource: false })) });
 
     await expect(
       runContentQualityPipeline(baseRequest({ factualityMode: "verified" }), provider)
@@ -208,10 +211,11 @@ describe("runContentQualityPipeline (integration)", () => {
 
     it("an ungrounded current-state claim on a freshness-sensitive topic triggers repair (not immediate failure), and a grounded patch passes", async () => {
       const provider = fakeProvider({
-        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false })),
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false, groundedInTodaySource: false })),
         repair: vi.fn(async () => ({
           patch: { sections: [{ index: 1, contentMarkdown: goodPost().sections[1]!.contentMarkdown }] } as RepairPatch,
           groundedInSearch: true,
+          groundedInTodaySource: true,
         })),
       });
 
@@ -226,8 +230,8 @@ describe("runContentQualityPipeline (integration)", () => {
 
     it("fails only after repair still can't ground the claim (never spends a 3rd call)", async () => {
       const provider = fakeProvider({
-        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false })),
-        repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false })),
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false, groundedInTodaySource: false })),
+        repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: false, groundedInTodaySource: false })),
       });
 
       await expect(runContentQualityPipeline(freshnessRequest(), provider)).rejects.toBeInstanceOf(
@@ -237,9 +241,21 @@ describe("runContentQualityPipeline (integration)", () => {
       expect(provider.repair).toHaveBeenCalledTimes(1);
     });
 
-    it("passes immediately (VERIFIED_CURRENT, no repair) when the first generation was already grounded", async () => {
+    it("STILL fails when repair performs a search but finds only stale (non-today) sources — never accepts yesterday-or-older", async () => {
       const provider = fakeProvider({
-        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: true })),
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: false, groundedInTodaySource: false })),
+        repair: vi.fn(async () => ({ patch: {} as RepairPatch, groundedInSearch: true, groundedInTodaySource: false })),
+      });
+
+      await expect(runContentQualityPipeline(freshnessRequest(), provider)).rejects.toBeInstanceOf(
+        ContentQualityFailedError
+      );
+      expect(provider.repair).toHaveBeenCalledTimes(1);
+    });
+
+    it("passes immediately (VERIFIED_CURRENT, no repair) when the first generation was already grounded in a today-dated source", async () => {
+      const provider = fakeProvider({
+        generate: vi.fn(async () => ({ post: postWithUngroundedClaim(), groundedInSearch: true, groundedInTodaySource: true })),
       });
 
       const { report } = await runContentQualityPipeline(freshnessRequest(), provider);
