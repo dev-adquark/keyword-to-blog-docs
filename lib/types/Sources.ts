@@ -102,4 +102,5 @@ export interface SourceRetrievalReport {
   attempts: RetrievalAttemptLog[];
   finalStatus: SourcePackStatus;
   sourcePack: SourcePack | null;
+  failureReasons: string[];
 }
