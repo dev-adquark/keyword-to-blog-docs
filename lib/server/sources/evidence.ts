@@ -1,8 +1,16 @@
 import "server-only";
 import type { ConflictedClaim, EvidenceClaim, NormalizedSource } from "@/lib/types";
-import { jaccardSimilarity } from "../content-quality/textStats";
+import { significantTermSimilarity } from "./textSimilarity";
 
-const SAME_STORY_TITLE_THRESHOLD = 0.35;
+// Stopword-filtered similarity (not raw Jaccard, which counts "the",
+// "today", "market" etc. as matching content) — a raw-word comparison was
+// clustering, and then sometimes conflict-excluding, genuinely unrelated
+// stories that merely shared common topic/filler vocabulary (e.g. two
+// distinct stock-market stories that both happen to say "stock market
+// today"). Requiring real, specific-term overlap avoids that false rejection
+// while still reliably clustering genuine same-story coverage, which tends
+// to share several specific proper nouns/numbers, not just broad topic words.
+const SAME_STORY_TITLE_THRESHOLD = 0.3;
 
 /**
  * Pragmatic, deterministic claim/evidence mapping — this deployment has no
@@ -22,7 +30,7 @@ export function buildEvidenceMap(sources: NormalizedSource[]): {
 } {
   const clusters: NormalizedSource[][] = [];
   for (const source of sources) {
-    const cluster = clusters.find((c) => jaccardSimilarity(c[0]!.title, source.title) >= SAME_STORY_TITLE_THRESHOLD);
+    const cluster = clusters.find((c) => significantTermSimilarity(c[0]!.title, source.title) >= SAME_STORY_TITLE_THRESHOLD);
     if (cluster) cluster.push(source);
     else clusters.push([source]);
   }

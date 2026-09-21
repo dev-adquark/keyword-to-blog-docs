@@ -28,6 +28,27 @@ describe("buildEvidenceMap", () => {
     expect(approvedClaims).toHaveLength(0);
   });
 
+  it("REGRESSION: does not falsely cluster (and therefore never falsely conflict-excludes) two genuinely different stories that only share broad topic/filler words", () => {
+    // Two real, unrelated stock-market stories from the same day — sharing
+    // "stock", "market", "today" etc. was enough to cluster them under the
+    // old raw-Jaccard comparison, which could then spuriously flag them as
+    // "conflicting" (different numbers) even though they're about entirely
+    // different events.
+    const a = normalizedSource({
+      sourceId: "a",
+      title: "Stock Market Today: S&P 500, Nasdaq 100 Futures Gain as Trump Issues Fresh Warning to Iran",
+      description: "U.S. futures rose 0.5% this morning as investors weighed geopolitical developments.",
+    });
+    const b = normalizedSource({
+      sourceId: "b",
+      title: "Sensex jumps 690 pts intraday, Nifty tops 23,400: 4 factors behind mkt rise",
+      description: "Indian markets rallied on strong foreign inflows and easing crude oil prices.",
+    });
+    const { approvedClaims, excludedClaims } = buildEvidenceMap([a, b]);
+    expect(excludedClaims).toHaveLength(0);
+    expect(approvedClaims).toHaveLength(2); // two separate, independent claims — never merged, never conflicted
+  });
+
   it("does not flag a conflict when only one source in the cluster cites a number", () => {
     const a = normalizedSource({ sourceId: "a", title: "Company X reports quarterly revenue growth", description: "Revenue grew 25% year over year." });
     const b = normalizedSource({ sourceId: "b", title: "Company X reports quarterly revenue growth", description: "The company says results beat expectations." });

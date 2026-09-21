@@ -55,4 +55,36 @@ describe("isWithinFreshnessPolicy", () => {
       expect(isWithinFreshnessPolicy(source, "NO_FRESHNESS_REQUIREMENT", NOW)).toBe(true);
     });
   });
+
+  describe("LAST_7_DAYS boundary", () => {
+    it("accepts content from 3 days ago, not just today — this was being incorrectly rejected under a today-only policy", () => {
+      const source = normalizedSource({ publishedAt: new Date(NOW.getTime() - 3 * 24 * 3600_000).toISOString() });
+      expect(isWithinFreshnessPolicy(source, "LAST_7_DAYS", NOW)).toBe(true);
+    });
+
+    it("accepts content from exactly 7 days ago (inclusive boundary)", () => {
+      const source = normalizedSource({ publishedAt: new Date(NOW.getTime() - 7 * 24 * 3600_000).toISOString() });
+      expect(isWithinFreshnessPolicy(source, "LAST_7_DAYS", NOW)).toBe(true);
+    });
+
+    it("rejects content just past the 7-day boundary", () => {
+      const source = normalizedSource({ publishedAt: new Date(NOW.getTime() - 7 * 24 * 3600_000 - 60_000).toISOString() });
+      expect(isWithinFreshnessPolicy(source, "LAST_7_DAYS", NOW)).toBe(false);
+    });
+
+    it("rejects content from 10 days ago", () => {
+      const source = normalizedSource({ publishedAt: new Date(NOW.getTime() - 10 * 24 * 3600_000).toISOString() });
+      expect(isWithinFreshnessPolicy(source, "LAST_7_DAYS", NOW)).toBe(false);
+    });
+
+    it("still rejects a missing or unparseable date under the 7-day policy — only the window widened, not the date requirement", () => {
+      expect(isWithinFreshnessPolicy(normalizedSource({ publishedAt: null }), "LAST_7_DAYS", NOW)).toBe(false);
+      expect(isWithinFreshnessPolicy(normalizedSource({ publishedAt: "garbage" }), "LAST_7_DAYS", NOW)).toBe(false);
+    });
+
+    it("still rejects a future-dated article under the 7-day policy", () => {
+      const source = normalizedSource({ publishedAt: new Date(NOW.getTime() + 24 * 3600_000).toISOString() });
+      expect(isWithinFreshnessPolicy(source, "LAST_7_DAYS", NOW)).toBe(false);
+    });
+  });
 });

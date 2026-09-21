@@ -93,6 +93,13 @@ describe("runSourceGroundedPipeline", () => {
     expect(rewriteFromSourcePack).not.toHaveBeenCalled();
   });
 
+  it("uses a rolling 7-day freshness window, not 'published today only'", async () => {
+    vi.mocked(retrieveValidatedSourcePack).mockResolvedValue(failingReport());
+    await runSourceGroundedPipeline(baseRequest(), "req_1").catch(() => {});
+
+    expect(retrieveValidatedSourcePack).toHaveBeenCalledWith(expect.objectContaining({ freshnessPolicy: "LAST_7_DAYS" }));
+  });
+
   it("makes exactly ONE Anthropic call and publishes when the source pack passes and the rewrite is valid", async () => {
     const pack = sourcePack();
     vi.mocked(retrieveValidatedSourcePack).mockResolvedValue(passingReport(pack));

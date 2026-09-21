@@ -107,7 +107,13 @@ export async function runSourceGroundedPipeline(
     requestId,
     topic: request.topic ?? request.keywords[0] ?? "",
     keywords: request.keywords,
-    freshnessPolicy: "TODAY_ONLY",
+    // A rolling 7-day window, not "published today only" — same-day news
+    // is common for breaking stories, but requiring it for every
+    // freshness-sensitive topic rejected plenty of still-current, still
+    // accurate coverage from the last few days. Content older than 7 days,
+    // or with a missing/unparseable publication date, is still rejected —
+    // see lib/server/sources/freshness.ts.
+    freshnessPolicy: "LAST_7_DAYS",
     language: request.language,
     country: request.region,
   });

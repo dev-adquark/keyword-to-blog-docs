@@ -22,6 +22,18 @@ describe("evaluateRelevance", () => {
     expect(result.relevant).toBe(false);
   });
 
+  it("REGRESSION: accepts a genuinely relevant article that phrases a keyword in a different grammatical number (singular vs. plural)", () => {
+    const source = normalizedSource({
+      title: "New electric vehicle tax credit rules take effect nationwide",
+      description: "The updated rules change how buyers of a new electric vehicle can claim the credit.",
+    });
+    // Request uses the plural "vehicles"; the article consistently uses
+    // the singular "vehicle" — this was being incorrectly rejected by a
+    // strict exact-substring match.
+    const result = evaluateRelevance(source, ["electric vehicles tax credit"], "electric vehicles tax credit changes");
+    expect(result.relevant).toBe(true);
+  });
+
   it("rejects a source that doesn't mention the primary topic at all", () => {
     const source = normalizedSource({
       title: "Local weather forecast calls for rain this weekend",

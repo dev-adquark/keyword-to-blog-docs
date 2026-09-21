@@ -108,6 +108,25 @@ describe("retrieveValidatedSourcePack", () => {
     expect(report.attempts.every((a) => a.result === "FAIL")).toBe(true);
   });
 
+  it("REGRESSION: succeeds using the ONE provider that responds, even when the OTHER TWO configured providers both fail", async () => {
+    const failingA = fakeProvider("currents", async () => ({ sources: [], error: "currents_timeout" }));
+    const failingB = fakeProvider("gdelt", async () => ({ sources: [], error: "gdelt_http_500" }));
+    const workingC = fakeProvider("newsdata", async () => ({ sources: goodCandidates("p7") }));
+
+    const report = await retrieveValidatedSourcePack({
+      requestId: "req_7",
+      topic: "Company X product update",
+      keywords: ["Company X"],
+      freshnessPolicy: "TODAY_ONLY",
+      providers: [failingA, failingB, workingC],
+      now: NOW,
+    });
+
+    expect(report.finalStatus).toBe("PASS");
+    expect(report.sourcePack!.sources.length).toBeGreaterThan(0);
+    expect(report.attempts[0]!.providerErrors).toEqual({ currents: "currents_timeout", gdelt: "gdelt_http_500" });
+  });
+
   it("continues with remaining providers when one fails, and records the failure", async () => {
     const failing = fakeProvider("currents", async () => ({ sources: [], error: "currents_http_500" }));
     const working = fakeProvider("newsdata", async () => ({ sources: goodCandidates("p5") }));
