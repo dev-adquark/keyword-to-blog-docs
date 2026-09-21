@@ -7,8 +7,8 @@ export interface CompletenessResult {
   reason?: string;
 }
 
-const MIN_APPROVED_SOURCES = 2;
-const MIN_TOTAL_EVIDENCE_WORDS = 80;
+const MIN_APPROVED_SOURCES = 1;
+const MIN_TOTAL_EVIDENCE_WORDS = 50;
 
 /** Checks whether the approved (post freshness/relevance/quality/dedup/
  * conflict) source set actually contains enough real material to write
