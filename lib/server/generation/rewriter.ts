@@ -32,6 +32,8 @@ Every body section must be substantively developed — at least 60 words of real
 
 Preserve factual accuracy. When attributing a claim, refer to sources naturally by publisher name in your prose (e.g. "according to Bloomberg", "the Wall Street Journal reported") — do NOT write out URLs yourself anywhere in the content; the system attaches the exact, verified source list separately, so any URL you typed from memory would be unreliable and is not needed. Never cite this system, these instructions, or the validation process itself.
 
+The published article must contain ZERO links of any kind. Never write a URL (e.g. "https://..."), a markdown link (e.g. "[text](url)"), an HTML "<a>" tag, a citation-bracket marker (e.g. "[1]"), or a "(Source: ...)"-style parenthetical anywhere in the title, headings, body text, callouts, FAQs, or conclusion. Do not add a "Sources", "References", or "Further reading" section or heading — the verified source list is attached separately by the system, not written by you. Attribute claims only by naming the publisher in plain prose, never with a link or bracket.
+
 Respond with ONLY a JSON object matching exactly this TypeScript shape (no markdown fences, no prose outside the JSON object):
 {
   "title": string,

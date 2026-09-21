@@ -3,7 +3,7 @@ import type { ContentQualityReport, FreshnessStatus, GenerateRequestV1, SEOPostV
 import { ApiError } from "../apiErrors";
 import { retrieveValidatedSourcePack } from "../sources/retrieve";
 import { rewriteFromSourcePack } from "../generation/rewriter";
-import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance } from "../postRender";
+import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance, stripSourceContent } from "../postRender";
 import { buildContentBrief } from "./contentBrief";
 import { evaluateWritingQuality } from "./writingQuality";
 import { evaluateOriginality } from "./originality";
@@ -16,6 +16,7 @@ import { evaluateSpamSignals } from "./spamDetection";
 import { evaluateFactuality } from "./factuality";
 import { evaluateEvidenceClaims } from "./evidenceClaims";
 import { evaluateCitationIntegrity } from "./citationIntegrity";
+import { evaluateNoPublishedLinks } from "./noPublishedLinks";
 import { buildQualityReport } from "./scoring";
 import { decideQualityGate } from "./qualityGate";
 import { applyDeterministicFixes } from "./autoFix";
@@ -68,8 +69,15 @@ export class SourceValidationFailedError extends ApiError {
 
 function finalizePost(post: SEOPostV1, request: GenerateRequestV1): SEOPostV1 {
   const constrained = enforceSectionConstraint(post, request.constraints);
-  assertWordCountWithinTolerance(countWords(constrained), request.constraints);
-  return constrained;
+  // Unconditional final safety layer — published content must never
+  // contain a source link/URL/citation, regardless of prompt compliance.
+  // post.sources (the internal citation-tracking/validation array checked
+  // by citationIntegrity.ts below) is untouched by this — only the
+  // rendered prose fields are stripped. Runs before the word-count check
+  // so the check reflects the real, final word count.
+  const stripped = stripSourceContent(constrained);
+  assertWordCountWithinTolerance(countWords(stripped), request.constraints);
+  return stripped;
 }
 
 function withStatus(report: Omit<ContentQualityReport, "overallStatus">): ContentQualityReport {
@@ -99,6 +107,7 @@ function validateSourceGrounded(
   const spam = evaluateSpamSignals(post, brief, request.language);
   const factuality = evaluateFactuality(request, true); // real, retrieved, freshness-validated sources — genuinely verified
   const evidence = evaluateEvidenceClaims(request, post, groundingEvidenceText);
+  const noPublishedLinks = evaluateNoPublishedLinks(post);
 
   const freshnessStatus: FreshnessStatus = citation.failedChecks.length === 0 ? "VERIFIED_CURRENT" : "UNVERIFIED_BLOCKED";
   const freshness = { status: freshnessStatus, failedChecks: citation.failedChecks, warnings: citation.warnings };
@@ -108,7 +117,7 @@ function validateSourceGrounded(
       wordCount: countWords(post),
       keywordCoverage: keyword.keywordCoverage,
       revisionCount: 0,
-      outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence },
+      outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence, noPublishedLinks },
     })
   );
 }

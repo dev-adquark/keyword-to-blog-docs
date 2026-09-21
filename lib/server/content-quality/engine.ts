@@ -2,7 +2,7 @@ import "server-only";
 import type { ContentQualityReport, ContentQualitySummary, GenerateRequestV1, SEOPostV1 } from "@/lib/types";
 import { getAIProvider } from "../generation/anthropic";
 import type { AIProvider } from "../generation/provider";
-import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance } from "../postRender";
+import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance, stripSourceContent } from "../postRender";
 import { buildContentBrief } from "./contentBrief";
 import { buildSeoPlan } from "./seoPlan";
 import { evaluateWritingQuality } from "./writingQuality";
@@ -16,6 +16,7 @@ import { evaluateSpamSignals } from "./spamDetection";
 import { evaluateFactuality } from "./factuality";
 import { evaluateFreshness, isFreshnessSensitive } from "./freshness";
 import { evaluateEvidenceClaims } from "./evidenceClaims";
+import { evaluateNoPublishedLinks } from "./noPublishedLinks";
 import { buildQualityReport } from "./scoring";
 import { decideQualityGate } from "./qualityGate";
 import { applyDeterministicFixes } from "./autoFix";
@@ -57,19 +58,26 @@ async function validate(
   const factuality = evaluateFactuality(request);
   const freshness = evaluateFreshness(request, post);
   const evidence = evaluateEvidenceClaims(request, post);
+  const noPublishedLinks = evaluateNoPublishedLinks(post);
 
   return buildQualityReport({
     wordCount: countWords(post),
     keywordCoverage: keyword.keywordCoverage,
     revisionCount,
-    outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence },
+    outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence, noPublishedLinks },
   });
 }
 
 function finalizePost(post: SEOPostV1, request: GenerateRequestV1): SEOPostV1 {
   const constrained = enforceSectionConstraint(post, request.constraints);
-  assertWordCountWithinTolerance(countWords(constrained), request.constraints);
-  return constrained;
+  // Unconditional final safety layer — published content must never
+  // contain a source link/URL/citation, regardless of prompt compliance.
+  // Runs before the word-count check so the check reflects the real,
+  // final word count. post.sources (internal citation metadata) is
+  // untouched — see stripSourceContent's own docs in postRender.ts.
+  const stripped = stripSourceContent(constrained);
+  assertWordCountWithinTolerance(countWords(stripped), request.constraints);
+  return stripped;
 }
 
 function withStatus(report: Omit<ContentQualityReport, "overallStatus">): ContentQualityReport {

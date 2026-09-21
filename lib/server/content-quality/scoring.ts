@@ -12,6 +12,7 @@ import type { SpamDetectionResult } from "./spamDetection";
 import type { FactualityResult } from "./factuality";
 import type { FreshnessResult } from "./freshness";
 import type { EvidenceClaimsResult } from "./evidenceClaims";
+import type { NoPublishedLinksResult } from "./noPublishedLinks";
 
 export interface ValidatorOutputs {
   writing: WritingQualityResult;
@@ -28,6 +29,12 @@ export interface ValidatorOutputs {
    * score since asserting unverifiable specifics is a writing-integrity
    * concern, not a separate report category (see evidenceClaims.ts). */
   evidence: EvidenceClaimsResult;
+  /** A source link/URL/citation or "Sources" section that somehow survived
+   * the unconditional deterministic strip in postRender.ts — folded into
+   * the structure score, since a rogue Sources section or stray link is a
+   * structural content-shape defect. Always empty in normal operation; see
+   * noPublishedLinks.ts. */
+  noPublishedLinks: NoPublishedLinksResult;
 }
 
 /** Builds a report without deciding pass/fail — see qualityGate.ts for that.
@@ -49,7 +56,7 @@ export function buildQualityReport(params: {
   const seoScore = Math.round((outputs.seo.score + outputs.spam.score) / 2);
   const readabilityScore = outputs.readability.score;
   const keywordScore = outputs.keyword.score;
-  const structureScore = outputs.structure.score;
+  const structureScore = Math.round((outputs.structure.score + outputs.noPublishedLinks.score) / 2);
 
   const categoryScores = [writingScore, originalityScore, depthScore, seoScore, readabilityScore, keywordScore, structureScore];
   const overallScore = Math.round(categoryScores.reduce((a, b) => a + b, 0) / categoryScores.length);
@@ -63,6 +70,7 @@ export function buildQualityReport(params: {
     ...outputs.readability.failedChecks,
     ...outputs.keyword.failedChecks,
     ...outputs.structure.failedChecks,
+    ...outputs.noPublishedLinks.failedChecks,
     ...outputs.spam.failedChecks,
     ...outputs.factuality.failedChecks,
     ...outputs.freshness.failedChecks,
@@ -77,6 +85,7 @@ export function buildQualityReport(params: {
     ...outputs.readability.warnings,
     ...outputs.keyword.warnings,
     ...outputs.structure.warnings,
+    ...outputs.noPublishedLinks.warnings,
     ...outputs.spam.warnings,
     ...outputs.factuality.warnings,
     ...outputs.freshness.warnings,
@@ -89,7 +98,7 @@ export function buildQualityReport(params: {
     { name: "seo", failedChecks: [...outputs.seo.failedChecks, ...outputs.spam.failedChecks] },
     { name: "readability", failedChecks: outputs.readability.failedChecks },
     { name: "keyword", failedChecks: outputs.keyword.failedChecks },
-    { name: "structure", failedChecks: outputs.structure.failedChecks },
+    { name: "structure", failedChecks: [...outputs.structure.failedChecks, ...outputs.noPublishedLinks.failedChecks] },
   ];
   const passedChecks = categories
     .filter((c) => c.failedChecks.filter((f) => f.severity === "blocking").length === 0)

@@ -203,4 +203,25 @@ describe("runContentQualityPipeline (integration)", () => {
     expect(provider.generate).not.toHaveBeenCalled();
     expect(provider.repair).not.toHaveBeenCalled();
   });
+
+  it("REGRESSION: strips a link/citation the model wrote anyway, end-to-end through the real pipeline — never trusts prompt compliance alone", async () => {
+    const withLink = goodPost({
+      sections: [
+        goodPost().sections[0]!,
+        {
+          type: "body",
+          heading: "Sources",
+          contentMarkdown: "See [the original study](https://example.com/study) for the full data.",
+        },
+        ...goodPost().sections.slice(1),
+      ],
+    });
+    const provider = fakeProvider({ generate: vi.fn(async () => withLink) });
+
+    const { post } = await runContentQualityPipeline(baseRequest(), REQUEST_ID, provider);
+
+    const allText = JSON.stringify(post);
+    expect(allText).not.toMatch(/https?:\/\//);
+    expect(post.sections.some((s) => s.heading?.toLowerCase() === "sources")).toBe(false);
+  });
 });

@@ -173,4 +173,32 @@ describe("runSourceGroundedPipeline", () => {
     expect(post.title).not.toMatch(/\b(19|20)\d{2}\b/); // the free mechanical pass strips the stray year
     expect(rewriteFromSourcePack).toHaveBeenCalledTimes(1);
   });
+
+  it("REGRESSION: strips a link/citation/Sources-section the model wrote in its content, even though it has a legitimate sources array too", async () => {
+    const pack = sourcePack();
+    vi.mocked(retrieveValidatedSourcePack).mockResolvedValue(passingReport(pack));
+    vi.mocked(rewriteFromSourcePack).mockResolvedValue(
+      goodPost({
+        sections: [
+          goodPost().sections[0]!,
+          {
+            type: "body",
+            heading: "Sources",
+            contentMarkdown: `See [the original article](${pack.sources[0]!.url}) for more.`,
+          },
+          ...goodPost().sections.slice(1),
+        ],
+        sources: [{ title: "Real source title", url: "https://example.com/real-source", publishedAt: pack.sources[0]!.publishedAt }],
+      })
+    );
+
+    const { post, report } = await runSourceGroundedPipeline(baseRequest(), "req_1");
+
+    expect(report.overallStatus).toBe("PASS");
+    const allSectionText = JSON.stringify(post.sections);
+    expect(allSectionText).not.toMatch(/https?:\/\//);
+    expect(post.sections.some((s) => s.heading?.toLowerCase() === "sources")).toBe(false);
+    // The internal citation-tracking array is untouched — only the rendered content is stripped.
+    expect(post.sources).toEqual([{ title: "Real source title", url: "https://example.com/real-source", publishedAt: pack.sources[0]!.publishedAt }]);
+  });
 });
