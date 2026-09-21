@@ -59,6 +59,7 @@ function passingReport(pack: SourcePack): SourceRetrievalReport {
     attempts: [{ attempt: 1, query: pack.topic, providersQueried: ["currents"], providerErrors: {}, candidatesRetrieved: 2, candidatesApproved: 1, result: "PASS" }],
     finalStatus: "PASS",
     sourcePack: pack,
+    failureReasons: [],
   };
 }
 
@@ -78,6 +79,7 @@ function failingReport(): SourceRetrievalReport {
     })),
     finalStatus: "FAIL",
     sourcePack: null,
+    failureReasons: [],
   };
 }
 

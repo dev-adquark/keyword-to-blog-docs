@@ -121,6 +121,7 @@ export async function retrieveValidatedSourcePack(input: RetrieveSourcesInput): 
         attempts,
         finalStatus: "PASS",
         sourcePack: pack,
+        failureReasons: [],
       };
     }
   }
@@ -136,5 +137,8 @@ export async function retrieveValidatedSourcePack(input: RetrieveSourcesInput): 
     // explain why. See SourceValidationFailedError in
     // ../content-quality/sourceGroundedPipeline.ts.
     sourcePack: lastPack,
+    // Mirrored at the top level too (in addition to sourcePack.failureReasons)
+    // for callers that want the reasons without reaching into the pack.
+    failureReasons: lastPack?.failureReasons ?? [],
   };
 }

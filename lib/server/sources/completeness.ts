@@ -7,16 +7,11 @@ export interface CompletenessResult {
   reason?: string;
 }
 
-<<<<<<< HEAD
-const MIN_APPROVED_SOURCES = 1;
-const MIN_TOTAL_EVIDENCE_WORDS = 50;
-=======
 const MIN_TOTAL_EVIDENCE_WORDS_MULTI_SOURCE = 80;
 // A single source has no corroboration from another outlet, so it must
 // carry meaningfully more of its own real detail to be trusted alone —
 // this is not the same bar as the combined total for 2+ sources.
 const MIN_EVIDENCE_WORDS_SINGLE_SOURCE = 150;
->>>>>>> 596510b (fix validation)
 
 function evidenceWordCount(source: NormalizedSource): number {
   // Only real description/content text counts — provider metadata
