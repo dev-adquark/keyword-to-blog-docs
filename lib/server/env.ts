@@ -30,6 +30,13 @@ export const env = {
   get ANTHROPIC_API_KEY() {
     return required("ANTHROPIC_API_KEY");
   },
+  /** Optional failover key — see lib/server/generation/anthropicClient.ts.
+   * If the primary key is invalid/unavailable/rate-limited or otherwise
+   * fails to produce a valid response, this key is tried next (never both
+   * at once, and never more than once a call has already succeeded). */
+  get ANTHROPIC_API_KEY_SECONDARY() {
+    return process.env.ANTHROPIC_API_KEY_SECONDARY || "";
+  },
   get AI_MODEL() {
     // Haiku by default — lowest token cost suitable for this product; override via env if needed.
     return optional("AI_MODEL", "claude-haiku-4-5-20251001");
@@ -65,6 +72,21 @@ export const env = {
   /** Resend's shared sender for accounts without a verified sending domain yet. */
   get RESEND_FROM_EMAIL() {
     return optional("RESEND_FROM_EMAIL", "onboarding@resend.dev");
+  },
+  /** Optional — news-source providers for freshness-sensitive generation
+   * (see lib/server/sources/). Each provider is skipped (not a hard error)
+   * if its key is unset; sourcePack.ts decides whether enough providers
+   * responded to proceed. */
+  get CURRENTS_API_KEY() {
+    return process.env.CURRENTS_API_KEY || "";
+  },
+  get NEWSDATA_API_KEY() {
+    return process.env.NEWSDATA_API_KEY || "";
+  },
+  /** GDELT's DOC 2.0 article search API is free/keyless — this is reserved
+   * for a future GDELT credential (e.g. BigQuery) and currently unused. */
+  get GDELT_API_TOKEN() {
+    return process.env.GDELT_API_TOKEN || "";
   },
 };
 

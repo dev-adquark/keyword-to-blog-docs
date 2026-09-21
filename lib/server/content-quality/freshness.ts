@@ -1,24 +1,17 @@
 import "server-only";
 import type { FailedCheck, FreshnessStatus, GenerateRequestV1, SEOPostV1 } from "@/lib/types";
-import { collectSectionProse } from "./textStats";
 
 /**
- * Detects freshness-sensitive topics (current prices, versions, laws,
- * "latest" anything, recent events) and checks whether the generated text
- * makes an unqualified current-state claim it can't actually back up.
- *
- * Unlike the old (pre-web-search) version of this check, this deployment can
- * now actually ground such claims in a live web_search result from the same
- * generation/repair call (see lib/server/generation/anthropic.ts). So the
- * question this file answers is no longer "did the model hedge enough
- * wording?" — it's "was this specific current-state claim actually backed by
- * a search result verified as published TODAY?" Per the strict freshness
- * policy, a source from yesterday or earlier does NOT count — there is no
- * "close enough" fallback. Only a claim genuinely grounded in a today-dated
- * source passes; everything else is blocked unconditionally (not only in
- * factualityMode: "verified"), because there is no honest reason to let an
- * ungrounded or stale currency claim through by default when real,
- * date-verified grounding is available.
+ * Defensive backstop only. Freshness-sensitive requests are routed at the
+ * top of the pipeline (see ../generation... and engine.ts's
+ * `runContentQualityPipeline`) to the source-pack-first pipeline in
+ * ../sources/ + ../generation/rewriter.ts, which is the only place real
+ * freshness verification happens (against actual retrieved, dated news
+ * sources — see ../sources/sourcePack.ts). This evergreen validator has no
+ * access to real source data and therefore can never legitimately pass a
+ * freshness-sensitive request — if one somehow reached this path anyway
+ * (a routing bug), it fails closed rather than silently letting an
+ * unverified "current" claim through.
  */
 export interface FreshnessResult {
   status: FreshnessStatus;
@@ -51,59 +44,18 @@ const FRESHNESS_SENSITIVE_TOPIC_SIGNALS = [
   "this year",
 ];
 
-const UNQUALIFIED_CURRENT_CLAIM_PATTERNS = [
-  /\bthe latest version is\b/i,
-  /\bcurrently costs?\b/i,
-  /\bas of (?:today|now|writing|this (?:year|month|week))\b/i,
-  /\bas of \d{4}\b/i,
-  /\bthe current (?:price|version|law|policy|rate) is\b/i,
-  /\bright now,? (?:the|it|prices?)\b/i,
-  /\btoday,? (?:the|prices?|rates?)\b/i,
-  /\bjust (?:announced|launched|released)\b/i,
-  /\bthis year'?s\b/i,
-];
-
-/** Exported so the generation provider can decide, before spending an
- * Anthropic call, whether the request is worth enabling (billed) web search
- * for — see lib/server/generation/anthropic.ts. */
+/** Exported so the pipeline can decide, before generation, whether a
+ * request must be routed through the source-pack-first pipeline instead of
+ * this evergreen one — see engine.ts. */
 export function isFreshnessSensitive(request: GenerateRequestV1): boolean {
   const haystack = [request.topic ?? "", ...request.keywords].join(" ").toLowerCase();
   return FRESHNESS_SENSITIVE_TOPIC_SIGNALS.some((signal) => haystack.includes(signal));
 }
 
-export function evaluateFreshness(
-  request: GenerateRequestV1,
-  post: SEOPostV1,
-  grounding: { groundedInSearch: boolean; groundedInTodaySource: boolean }
-): FreshnessResult {
+export function evaluateFreshness(request: GenerateRequestV1, _post: SEOPostV1): FreshnessResult {
   if (!isFreshnessSensitive(request)) {
     return { status: "NOT_APPLICABLE", failedChecks: [], warnings: [] };
   }
-
-  const allText = [post.title, ...collectSectionProse(post.sections), post.conclusion].join(" ");
-  const unqualifiedClaims = UNQUALIFIED_CURRENT_CLAIM_PATTERNS.filter((p) => p.test(allText));
-
-  if (unqualifiedClaims.length === 0) {
-    return grounding.groundedInTodaySource
-      ? { status: "VERIFIED_CURRENT", failedChecks: [], warnings: [] }
-      : {
-          status: "UNVERIFIED_ACCEPTABLE",
-          failedChecks: [],
-          warnings: [
-            "Freshness-sensitive topic: content avoided unqualified current-state claims. No source verified as published today was needed or found.",
-          ],
-        };
-  }
-
-  if (grounding.groundedInTodaySource) {
-    // The model made a current-state claim, and this call actually returned
-    // a live web_search result verified as published TODAY — trust it.
-    return { status: "VERIFIED_CURRENT", failedChecks: [], warnings: [] };
-  }
-
-  const searchNote = grounding.groundedInSearch
-    ? "a web search was performed, but none of the results could be verified as published today (yesterday or older does not count)"
-    : "no live web search backed it up at all";
 
   return {
     status: "UNVERIFIED_BLOCKED",
@@ -111,7 +63,8 @@ export function evaluateFreshness(
       {
         code: "UNGROUNDED_CURRENCY_CLAIM",
         severity: "blocking",
-        message: `This topic is freshness-sensitive (prices/versions/regulations/recent events/etc.) and the content states current information as fact (e.g. "currently costs", "the latest version is", "as of today"), but ${searchNote}. Per policy, only information verified as published today may be presented as current — never yesterday's or older information. Either ground the claim in a web_search result confirmed as published today, or rewrite it as general, hedged guidance without a specific current-state assertion.`,
+        message:
+          "This topic is freshness-sensitive and requires real, dated source evidence, but reached the evergreen generation path, which has no source-retrieval capability. This request should have been routed through the source-pack-first pipeline (see lib/server/sources/) — this is a fail-closed backstop, not the normal path.",
       },
     ],
     warnings: [],

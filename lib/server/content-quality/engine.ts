@@ -3,7 +3,6 @@ import type { ContentQualityReport, ContentQualitySummary, GenerateRequestV1, SE
 import { getAIProvider } from "../generation/anthropic";
 import type { AIProvider } from "../generation/provider";
 import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance } from "../postRender";
-import { ApiError } from "../apiErrors";
 import { buildContentBrief } from "./contentBrief";
 import { buildSeoPlan } from "./seoPlan";
 import { evaluateWritingQuality } from "./writingQuality";
@@ -15,63 +14,35 @@ import { evaluateKeywordQuality } from "./keywordQuality";
 import { evaluateStructure } from "./structure";
 import { evaluateSpamSignals } from "./spamDetection";
 import { evaluateFactuality } from "./factuality";
-import { evaluateFreshness } from "./freshness";
+import { evaluateFreshness, isFreshnessSensitive } from "./freshness";
 import { evaluateEvidenceClaims } from "./evidenceClaims";
 import { buildQualityReport } from "./scoring";
 import { decideQualityGate } from "./qualityGate";
 import { applyDeterministicFixes } from "./autoFix";
 import { applyRepairPatch } from "./repairPatch";
+import { runSourceGroundedPipeline } from "./sourceGroundedPipeline";
+import { ContentQualityFailedError, type QualityPipelineResult } from "./pipelineResult";
 
-export interface QualityPipelineResult {
-  post: SEOPostV1;
-  report: ContentQualityReport;
-}
-
-/**
- * Carries the FULL internal report (for DB persistence / logging) alongside
- * a deliberately minimal public `details` payload — the public API response
- * only ever sees stable, machine-readable failedCheck codes, never full
- * internal scores/messages (see "do not expose internal scoring
- * implementation unnecessarily").
- */
-export class ContentQualityFailedError extends ApiError {
-  report: ContentQualityReport;
-
-  constructor(report: ContentQualityReport) {
-    super(
-      "CONTENT_QUALITY_FAILED",
-      "Generated content did not meet the required quality standard after automatic correction.",
-      {
-        revisionCount: report.revisionCount,
-        overallScore: report.overallScore,
-        failedCheckCodes: [...new Set(report.failedChecks.filter((f) => f.severity === "blocking").map((f) => f.code))],
-      }
-    );
-    this.report = report;
-  }
-}
+export { ContentQualityFailedError, type QualityPipelineResult };
 
 /**
- * FACTUALITY_UNVERIFIED (blocking) means factualityMode: "verified" was
- * requested for the whole request's factual claims broadly — a capability
- * gap no amount of mechanical fixing or AI repair grants, so the one repair
- * call is never spent chasing it. UNGROUNDED_CURRENCY_CLAIM is different: a
- * real web_search-backed repair call CAN resolve it (see anthropic.ts), so
- * it deliberately is NOT treated as unfixable here.
+ * FACTUALITY_UNVERIFIED (factualityMode: "verified") and
+ * UNGROUNDED_CURRENCY_CLAIM (a freshness-sensitive request that somehow
+ * reached the evergreen pipeline — see freshness.ts) are both genuine
+ * capability gaps this provider cannot repair its way out of, so the one
+ * repair call is never wasted chasing either.
  */
 function isUnfixableByRepair(report: Omit<ContentQualityReport, "overallStatus">): boolean {
-  return report.failedChecks.some((f) => f.severity === "blocking" && f.code === "FACTUALITY_UNVERIFIED");
+  return report.failedChecks.some(
+    (f) => f.severity === "blocking" && (f.code === "FACTUALITY_UNVERIFIED" || f.code === "UNGROUNDED_CURRENCY_CLAIM")
+  );
 }
 
-/** Runs every deterministic validator and folds the results into one report.
- * `grounding` reflects whether the most recent generate/repair call actually
- * returned a live web_search result, and whether one of those results was
- * verified as published TODAY — see freshness.ts. */
+/** Runs every deterministic validator and folds the results into one report. */
 async function validate(
   request: GenerateRequestV1,
   post: SEOPostV1,
-  revisionCount: number,
-  grounding: { groundedInSearch: boolean; groundedInTodaySource: boolean }
+  revisionCount: number
 ): Promise<Omit<ContentQualityReport, "overallStatus">> {
   const brief = buildContentBrief(request);
 
@@ -84,7 +55,7 @@ async function validate(
   const structure = evaluateStructure(post);
   const spam = evaluateSpamSignals(post, brief, request.language);
   const factuality = evaluateFactuality(request);
-  const freshness = evaluateFreshness(request, post, grounding);
+  const freshness = evaluateFreshness(request, post);
   const evidence = evaluateEvidenceClaims(request, post);
 
   return buildQualityReport({
@@ -111,6 +82,13 @@ function withStatus(report: Omit<ContentQualityReport, "overallStatus">): Conten
  * per request (generate + repair) — never a third, and the repair call is
  * a minimal patch, never a full re-generation.
  *
+ * Freshness-sensitive requests (see freshness.ts's isFreshnessSensitive)
+ * never reach this evergreen flow at all — they're routed to the
+ * source-pack-first pipeline in ./sourceGroundedPipeline.ts, which
+ * retrieves and validates real, dated news evidence BEFORE the single
+ * allowed Anthropic call, rather than relying on Anthropic's own knowledge
+ * or a research tool (see lib/server/sources/).
+ *
  * CONTENT_QUALITY_FAILED is thrown only when: a capability gap makes the
  * request unfixable by design (factualityMode: "verified" — see
  * isUnfixableByRepair), or blocking failures remain after both the
@@ -120,16 +98,19 @@ function withStatus(report: Omit<ContentQualityReport, "overallStatus">): Conten
  */
 export async function runContentQualityPipeline(
   request: GenerateRequestV1,
+  requestId: string,
   provider: AIProvider = getAIProvider()
 ): Promise<QualityPipelineResult> {
+  if (isFreshnessSensitive(request)) {
+    return runSourceGroundedPipeline(request, requestId);
+  }
+
   const brief = buildContentBrief(request);
   const plan = buildSeoPlan(request, brief);
 
   // Anthropic call 1 of at most 2.
-  const generated = await provider.generate(request, { brief, plan });
-  let post = finalizePost(generated.post, request);
-  let grounding = { groundedInSearch: generated.groundedInSearch, groundedInTodaySource: generated.groundedInTodaySource };
-  let report = withStatus(await validate(request, post, 0, grounding));
+  let post = finalizePost(await provider.generate(request, { brief, plan }), request);
+  let report = withStatus(await validate(request, post, 0));
 
   if (report.overallStatus === "PASS") return { post, report };
   if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
@@ -140,7 +121,7 @@ export async function runContentQualityPipeline(
   const mechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
   if (mechanicalFix.appliedFixes.length > 0) {
     post = finalizePost(mechanicalFix.post, request);
-    report = withStatus(await validate(request, post, 0, grounding));
+    report = withStatus(await validate(request, post, 0));
     if (report.overallStatus === "PASS") return { post, report };
     if (isUnfixableByRepair(report)) throw new ContentQualityFailedError(report);
   }
@@ -149,16 +130,9 @@ export async function runContentQualityPipeline(
   // still blocking (semantic writing/depth/originality/keyword issues that
   // mechanical fixes genuinely can't rewrite prose for).
   const blockingFailures = report.failedChecks.filter((f) => f.severity === "blocking");
-  const repaired = await provider.repair({ request, post, failedChecks: blockingFailures, context: { brief, plan } });
-  post = finalizePost(applyRepairPatch(post, repaired.patch), request);
-  // The repair call may have grounded a currency claim (in a today-dated
-  // source) that the original generation didn't — carry that forward for
-  // the final freshness check.
-  grounding = {
-    groundedInSearch: grounding.groundedInSearch || repaired.groundedInSearch,
-    groundedInTodaySource: grounding.groundedInTodaySource || repaired.groundedInTodaySource,
-  };
-  report = withStatus(await validate(request, post, 1, grounding));
+  const patch = await provider.repair({ request, post, failedChecks: blockingFailures, context: { brief, plan } });
+  post = finalizePost(applyRepairPatch(post, patch), request);
+  report = withStatus(await validate(request, post, 1));
 
   // One more free mechanical pass to mop up anything cosmetic the repair
   // call left behind or introduced — the "safest available fallback
@@ -166,7 +140,7 @@ export async function runContentQualityPipeline(
   const finalMechanicalFix = applyDeterministicFixes(post, report.failedChecks, brief);
   if (finalMechanicalFix.appliedFixes.length > 0) {
     post = finalizePost(finalMechanicalFix.post, request);
-    report = withStatus(await validate(request, post, 1, grounding));
+    report = withStatus(await validate(request, post, 1));
   }
 
   if (report.overallStatus === "PASS") return { post, report };

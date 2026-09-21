@@ -14,33 +14,21 @@ export interface RepairRequest {
   context?: GenerationContext;
 }
 
-/** `groundedInSearch` is true only when the call actually returned at least
- * one non-empty live web_search result — never merely because the tool was
- * offered. `groundedInTodaySource` is the stricter bar freshness.ts actually
- * gates on: true only if one of those results is verified (via its
- * page_age) as published TODAY — a search that only turned up yesterday's or
- * older sources still leaves this false, per the strict "never present
- * yesterday-or-older information as current" policy (see
- * lib/server/content-quality/freshness.ts). */
-export interface GenerateResult {
-  post: SEOPostV1;
-  groundedInSearch: boolean;
-  groundedInTodaySource: boolean;
-}
-
-export interface RepairResult {
-  patch: RepairPatch;
-  groundedInSearch: boolean;
-  groundedInTodaySource: boolean;
-}
-
+/**
+ * The evergreen ("standard") generate/repair provider — used only for
+ * non-freshness-sensitive requests. Never offered a web_search/research
+ * tool: Anthropic is not the source of truth for what's current (see
+ * lib/server/sources/ and lib/server/generation/rewriter.ts, which handle
+ * freshness-sensitive requests through a completely separate,
+ * source-pack-first pipeline — see lib/server/content-quality/engine.ts).
+ */
 export interface AIProvider {
-  generate(request: GenerateRequestV1, context?: GenerationContext): Promise<GenerateResult>;
+  generate(request: GenerateRequestV1, context?: GenerationContext): Promise<SEOPostV1>;
   /**
    * ONE targeted repair call — returns a partial patch of only the
    * fields/sections that needed to change, never a full re-generation. See
    * lib/server/content-quality/engine.ts for the 2-call-per-request budget
    * this exists to support.
    */
-  repair(params: RepairRequest): Promise<RepairResult>;
+  repair(params: RepairRequest): Promise<RepairPatch>;
 }

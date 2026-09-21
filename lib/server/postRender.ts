@@ -104,6 +104,10 @@ export function renderMarkdown(post: SEOPostV1): string {
     }
   }
   parts.push(post.conclusion);
+  if (post.sources?.length) {
+    parts.push("## Sources");
+    parts.push(post.sources.map((s) => `- [${s.title}](${s.url})`).join("\n"));
+  }
   return parts.join("\n\n");
 }
 
@@ -129,5 +133,13 @@ export function renderHtml(post: SEOPostV1): string {
     }
   }
   parts.push(paragraphsToHtml(post.conclusion));
+  if (post.sources?.length) {
+    parts.push("<h2>Sources</h2>");
+    parts.push(
+      `<ul>${post.sources
+        .map((s) => `<li><a href="${escapeHtml(s.url)}" rel="noopener noreferrer">${escapeHtml(s.title)}</a></li>`)
+        .join("")}</ul>`
+    );
+  }
   return parts.join("\n");
 }

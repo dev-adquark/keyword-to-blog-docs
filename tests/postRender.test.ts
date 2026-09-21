@@ -143,6 +143,22 @@ describe("renderMarkdown", () => {
     expect(md).toContain("A1.");
     expect(md).toContain("The conclusion.");
   });
+
+  it("renders a Sources section when the post has source attribution (freshness-sensitive content)", () => {
+    const post = makePost({
+      sources: [
+        { title: "Company X launches new product", url: "https://example.com/story", publishedAt: "2026-09-21T10:00:00.000Z" },
+      ],
+    });
+    const md = renderMarkdown(post);
+    expect(md).toContain("## Sources");
+    expect(md).toContain("[Company X launches new product](https://example.com/story)");
+  });
+
+  it("omits the Sources section entirely for evergreen content with no sources", () => {
+    const md = renderMarkdown(makePost());
+    expect(md).not.toContain("## Sources");
+  });
 });
 
 describe("renderHtml", () => {
@@ -152,6 +168,15 @@ describe("renderHtml", () => {
     expect(html).toContain("<h1>Main Heading</h1>");
     expect(html).toContain("<h2>Body heading</h2>");
     expect(html).toMatch(/<p>.*Intro text here\..*<\/p>/);
+  });
+
+  it("renders and escapes a Sources section when present", () => {
+    const post = makePost({
+      sources: [{ title: "Company X <update>", url: "https://example.com/story", publishedAt: null }],
+    });
+    const html = renderHtml(post);
+    expect(html).toContain("<h2>Sources</h2>");
+    expect(html).toContain('<a href="https://example.com/story" rel="noopener noreferrer">Company X &lt;update&gt;</a>');
   });
 
   it("escapes HTML special characters from model-generated content — no injection", () => {

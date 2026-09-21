@@ -131,6 +131,15 @@ export const seoPostSchema = z.object({
       ),
     })
     .optional(),
+  sources: z
+    .array(
+      z.object({
+        title: z.string().min(1),
+        url: z.string().min(1),
+        publishedAt: z.string().nullable(),
+      })
+    )
+    .optional(),
 });
 
 export const accessRequestSchema = z.object({

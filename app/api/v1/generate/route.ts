@@ -92,7 +92,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const { post, report } = await runContentQualityPipeline(generateRequest);
+    const { post, report } = await runContentQualityPipeline(generateRequest, requestId);
     const words = countWords(post);
 
     recordContentQualityReport({

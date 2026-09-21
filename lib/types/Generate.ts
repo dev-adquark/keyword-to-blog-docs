@@ -58,6 +58,11 @@ export interface SEOPostV1 {
   coverageNotes?: {
     keywordCoverage: Array<{ keyword: string; covered: boolean; evidence: string }>;
   };
+  /** Present only for freshness-sensitive posts generated from a validated
+   * source pack (see lib/server/sources/) — the real, retrieved articles
+   * the content is grounded in. Never fabricated: every entry traces back
+   * to an approved NormalizedSource. */
+  sources?: Array<{ title: string; url: string; publishedAt: string | null }>;
 }
 
 export interface GenerateResponseV1 {

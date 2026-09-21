@@ -54,7 +54,7 @@ export async function processJob(jobId: string): Promise<JobRow | null> {
   const started = Date.now();
 
   try {
-    const { post, report } = await runContentQualityPipeline(job.input);
+    const { post, report } = await runContentQualityPipeline(job.input, job.request_id);
     const words = countWords(post);
 
     recordContentQualityReport({

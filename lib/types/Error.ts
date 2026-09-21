@@ -9,6 +9,7 @@ export type ErrorCode =
   | "JOB_NOT_FOUND"
   | "JOB_FAILED"
   | "CONTENT_QUALITY_FAILED"
+  | "SOURCE_VALIDATION_FAILED"
   | "INTERNAL_ERROR";
 
 export interface ErrorResponseV1 {
