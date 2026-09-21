@@ -81,9 +81,27 @@ describe("retrieveValidatedSourcePack", () => {
     });
 
     expect(report.finalStatus).toBe("FAIL");
-    expect(report.sourcePack).toBeNull();
     expect(report.attempts).toHaveLength(3);
     expect(search).toHaveBeenCalledTimes(3);
+  });
+
+  it("REGRESSION: never returns an empty failure-reason array on total failure — the last attempt's real SourcePack (with its actual failureReasons) is preserved, not discarded", async () => {
+    const search = vi.fn(async () => ({ sources: [] }));
+    const providers = [fakeProvider("currents", search)];
+
+    const report = await retrieveValidatedSourcePack({
+      requestId: "req_8",
+      topic: "Company X product update",
+      keywords: ["Company X"],
+      freshnessPolicy: "TODAY_ONLY",
+      providers,
+      now: NOW,
+    });
+
+    expect(report.finalStatus).toBe("FAIL");
+    expect(report.sourcePack).not.toBeNull();
+    expect(report.sourcePack!.status).toBe("FAIL");
+    expect(report.sourcePack!.failureReasons.length).toBeGreaterThan(0);
   });
 
   it("never relaxes the freshness policy across retries, even though it keeps failing", async () => {

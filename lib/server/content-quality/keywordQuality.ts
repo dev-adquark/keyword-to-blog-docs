@@ -1,7 +1,36 @@
 import "server-only";
 import type { ContentBrief, FailedCheck, SEOPostV1 } from "@/lib/types";
 import { KEYWORD_STUFFING } from "./config";
-import { countPhraseOccurrences, wordCount, collectSectionProse } from "./textStats";
+import { countPhraseOccurrences, tokenizeWords, wordCount, collectSectionProse } from "./textStats";
+
+/** Tolerates a trivial singular/plural mismatch ("vehicle" vs. "vehicles")
+ * — mirrors lib/server/sources/relevance.ts's fix for the same problem on
+ * the source-retrieval side. Not stemming, just the one common variant. */
+function containsTermTolerant(haystackLower: string, term: string): boolean {
+  if (haystackLower.includes(term)) return true;
+  if (term.endsWith("s") && term.length > 3) return haystackLower.includes(term.slice(0, -1));
+  return haystackLower.includes(`${term}s`);
+}
+
+function significantTermsOf(phrase: string): string[] {
+  return [...new Set(tokenizeWords(phrase).filter((w) => w.length > 2 || /\d/.test(w)))];
+}
+
+/**
+ * Whether a keyword/topic PHRASE is covered by the article — every
+ * significant word must appear somewhere (tolerating plural/singular), but
+ * NOT necessarily as one exact, contiguous, verbatim phrase in that order.
+ * Requiring the literal phrase (the old behavior) rejected genuinely
+ * on-topic, well-written articles that naturally varied the phrasing (word
+ * order, grammatical number) instead of mechanically repeating the exact
+ * request string — which real SEO writing practice actively prefers over
+ * exact-match keyword stuffing anyway.
+ */
+function isKeywordPhraseCovered(fullTextLower: string, phrase: string): boolean {
+  const terms = significantTermsOf(phrase);
+  if (terms.length === 0) return true;
+  return terms.every((t) => containsTermTolerant(fullTextLower, t));
+}
 
 export interface KeywordQualityResult {
   score: number;
@@ -31,12 +60,16 @@ export function evaluateKeywordQuality(post: SEOPostV1, brief: ContentBrief): Ke
     post.conclusion,
   ].join(" ");
   const totalWords = Math.max(1, wordCount(fullText));
+  const fullTextLower = fullText.toLowerCase();
 
+  // Exact-phrase count is still what stuffing/density is measured against
+  // below — literal repetition IS the concern for stuffing specifically.
   const primaryKeywordOccurrences = brief.primaryKeyword
     ? countPhraseOccurrences(fullText, brief.primaryKeyword)
     : 0;
+  const primaryKeywordCovered = !brief.primaryKeyword || isKeywordPhraseCovered(fullTextLower, brief.primaryKeyword);
 
-  if (brief.primaryKeyword && primaryKeywordOccurrences === 0) {
+  if (brief.primaryKeyword && !primaryKeywordCovered) {
     failed.push({
       code: "MISSING_PRIMARY_KEYWORD",
       severity: "blocking",
@@ -56,13 +89,12 @@ export function evaluateKeywordQuality(post: SEOPostV1, brief: ContentBrief): Ke
   let relatedKeywordOccurrences = 0;
   let coveredRelated = 0;
   for (const term of brief.relatedKeywords) {
-    const count = countPhraseOccurrences(fullText, term);
-    relatedKeywordOccurrences += count;
-    if (count > 0) coveredRelated++;
+    relatedKeywordOccurrences += countPhraseOccurrences(fullText, term);
+    if (isKeywordPhraseCovered(fullTextLower, term)) coveredRelated++;
   }
 
   const totalConcepts = 1 + brief.relatedKeywords.length;
-  const coveredConcepts = (primaryKeywordOccurrences > 0 ? 1 : 0) + coveredRelated;
+  const coveredConcepts = (primaryKeywordCovered ? 1 : 0) + coveredRelated;
   const keywordCoverage = totalConcepts > 0 ? coveredConcepts / totalConcepts : 1;
 
   if (brief.relatedKeywords.length > 0 && keywordCoverage < 0.5) {

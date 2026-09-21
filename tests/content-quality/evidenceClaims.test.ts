@@ -100,4 +100,35 @@ describe("evaluateEvidenceClaims", () => {
     const allText = result.failedChecks.map((f) => f.message).join(" ");
     expect(allText).not.toMatch(/AI[- ]?(probability|detected|undetectable)/i);
   });
+
+  it("REGRESSION: does NOT block a statistic that genuinely traces back to the real, retrieved source-pack evidence — this is exactly how legitimate news content is phrased", () => {
+    const post = goodPost({
+      sections: [
+        {
+          type: "body",
+          heading: "Market reaction",
+          contentMarkdown: "A recent survey found that 34% of professionals expect a rate cut before year-end.",
+        },
+      ],
+    });
+    const groundingEvidenceText =
+      "According to the survey published this week, 34% of professionals said they expect the central bank to cut rates before the end of the year.";
+    const result = evaluateEvidenceClaims(baseRequest(), post, groundingEvidenceText);
+    expect(result.failedChecks).toHaveLength(0);
+  });
+
+  it("still blocks a statistic that does NOT appear anywhere in the source-pack evidence, even when grounding text is supplied", () => {
+    const post = goodPost({
+      sections: [
+        {
+          type: "body",
+          heading: "Market reaction",
+          contentMarkdown: "A recent survey found that 91% of professionals expect a rate cut before year-end.",
+        },
+      ],
+    });
+    const groundingEvidenceText = "The central bank held rates steady this week, surprising some analysts.";
+    const result = evaluateEvidenceClaims(baseRequest(), post, groundingEvidenceText);
+    expect(result.failedChecks.some((f) => f.code === "UNSUPPORTED_EVIDENCE_CLAIM")).toBe(true);
+  });
 });

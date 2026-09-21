@@ -26,7 +26,7 @@ const CHECK_CATEGORIES = [
   { name: "Structure", detail: "Section ordering and shape beyond what the JSON schema alone enforces." },
   { name: "Spam signals", detail: "Keyword-stuffed headings and pushy commercial language out of place in informational content." },
   { name: "Factuality", detail: "See below — standard vs. verified mode." },
-  { name: "Freshness", detail: "See below — grounds freshness-sensitive topics in live web search." },
+  { name: "Freshness", detail: "See below — freshness-sensitive topics are grounded in real, retrieved news sources, not the model's own knowledge." },
 ];
 
 export default function ContentQualityPage() {
@@ -36,14 +36,17 @@ export default function ContentQualityPage() {
         <p className="font-mono text-xs text-indigo">Reference</p>
         <h1 className="mt-2 font-display text-3xl font-medium text-ink">Content quality pipeline</h1>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
-          The API never returns the first thing the model generates, but it also never spends more than one
-          extra AI call fixing it. Every request — synchronous or async — goes through the same pipeline:
-          generate once, validate deterministically, fix anything mechanically fixable for free, validate again,
-          and only spend one targeted AI repair call if a genuine semantic problem remains. A request never makes
-          more than 2 Anthropic calls total.
+          The API never returns the first thing the model generates. Every request goes through one of two
+          pipelines depending on the topic — see below — but both share the same principle: deterministic
+          validation decides what&rsquo;s good enough, and Anthropic is used as sparingly as possible to get
+          there.
         </p>
 
-        <h2 className="mt-10 font-display text-xl font-medium text-ink">Pipeline flow</h2>
+        <h2 className="mt-10 font-display text-xl font-medium text-ink">Evergreen pipeline (most requests)</h2>
+        <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
+          Used for topics that aren&rsquo;t freshness-sensitive (see below). Never spends more than 2 Anthropic
+          calls total.
+        </p>
         <ol className="mt-3 list-decimal space-y-2 pl-5 font-body text-[15px] text-muted">
           <li>A content brief and internal SEO plan are derived from your request (keywords, topic, audience) and folded into the generation prompt.</li>
           <li>The model generates a first draft — Anthropic call 1 of at most 2.</li>
@@ -52,6 +55,21 @@ export default function ContentQualityPage() {
           <li>Only if a genuine semantic problem remains (writing quality, originality, depth, or keyword-density issues that require real rewriting) is ONE targeted repair call made — Anthropic call 2 of at most 2. It receives only the specific failed checks and returns a minimal patch of just the fields/sections that need to change, never the whole article rewritten from scratch.</li>
           <li>The patch is merged onto the existing post — everything not in the patch is preserved exactly — and validated again, followed by one more free mechanical cleanup pass.</li>
           <li>The request fails with <code className="font-mono">CONTENT_QUALITY_FAILED</code> only if a genuine, unresolved quality problem remains after this — never merely because a cosmetic/non-critical check is still imperfect, and never by silently lowering the bar.</li>
+        </ol>
+
+        <h2 className="mt-10 font-display text-xl font-medium text-ink">Source-grounded pipeline (freshness-sensitive topics)</h2>
+        <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
+          Used automatically for topics touching prices, software versions, laws, regulations, current
+          statistics, or recent events (see below). Makes at most ONE Anthropic call — never a repair call — and
+          can make zero Anthropic calls at all if no sufficient real source material is found.
+        </p>
+        <ol className="mt-3 list-decimal space-y-2 pl-5 font-body text-[15px] text-muted">
+          <li>Real news articles are retrieved from four independent providers (Currents API, NewsData.io, NewsAPI.org, and GDELT) in parallel. One provider failing, timing out, or being unavailable never blocks the others.</li>
+          <li>Retrieved articles are normalized, deduplicated (identical/near-identical URLs and headlines collapse to one entry), and validated: published within the last 7 days with a real, parseable timestamp; genuinely relevant to the request (not just an incidental keyword match); meeting basic source-quality bars (a valid URL, a real title, real description/content text); and free of unresolved conflicts (sources covering the same story with contradicting figures are excluded rather than guessed between).</li>
+          <li>If validation doesn&rsquo;t yield enough real, trustworthy evidence, retrieval retries with a broader query — up to 3 attempts total. The freshness window is never relaxed to force a pass. If all 3 attempts fail, the request fails with <code className="font-mono">SOURCE_VALIDATION_FAILED</code> and Anthropic is never called.</li>
+          <li>Once validation passes, the approved source set is locked. Anthropic is called exactly once, purely as an editorial rewriter — it transforms the locked, verified evidence into an original article and is explicitly instructed never to add facts from its own memory.</li>
+          <li>The article&rsquo;s source list is built deterministically from the locked source pack in code, never from text the model wrote — so a cited URL can never be fabricated or mistyped.</li>
+          <li>Deterministic validators then run once (the same categories as the evergreen pipeline, plus citation integrity). If a genuine problem remains, the request fails with <code className="font-mono">CONTENT_QUALITY_FAILED</code> — there is no second Anthropic call to try to fix it.</li>
         </ol>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">What gets checked</h2>
@@ -82,25 +100,34 @@ export default function ContentQualityPage() {
         </p>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
           Setting <code className="font-mono">factualityMode: &quot;verified&quot;</code> requests source-backed
-          verification of factual claims. This deployment has no source-retrieval capability, so rather than
-          fabricate sources, citations, or statistics, a <code className="font-mono">&quot;verified&quot;</code>{" "}
-          request currently fails with <code className="font-mono">CONTENT_QUALITY_FAILED</code>. Use standard mode
-          unless you have an external fact-checking step of your own downstream.
+          verification of factual claims. For a freshness-sensitive topic (see below), this is honored for real —
+          the request goes through the source-grounded pipeline, which retrieves and validates real news sources
+          before generation, and the response is reported as genuinely <code className="font-mono">VERIFIED</code>.
+          For a topic that isn&rsquo;t freshness-sensitive, there is no source-retrieval step to verify anything
+          against, so rather than fabricate sources, citations, or statistics, the request fails honestly with{" "}
+          <code className="font-mono">CONTENT_QUALITY_FAILED</code> instead.
         </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">Freshness-sensitive topics</h2>
         <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
           Topics touching prices, software versions, laws, regulations, current statistics, or recent events are
-          detected automatically. For these requests only, the model is given real-time web search and today&rsquo;s
-          actual date, and using search before writing any current-state claim is mandatory. The bar is strict: a
-          claim only counts as verified if a search result&rsquo;s own recency (its page age or published date) can
-          be confirmed as <strong>today</strong> — a source from yesterday or earlier never counts as current, and
-          is treated exactly like no source at all. A current-state claim (a stated price, version, or &ldquo;as of
-          today&rdquo;-style assertion) that isn&rsquo;t backed by a today-dated result is never returned silently —
-          it is treated as a genuine quality failure and goes through the same automatic repair step (with search
-          enabled) as any other blocking issue, or is rewritten as general, hedged guidance if a clear, today-dated
-          answer still isn&rsquo;t found. The pipeline never invents a date, price, or &ldquo;latest&rdquo; fact, and
-          never presents older information as if it were current.
+          detected automatically and routed to the source-grounded pipeline described above. Anthropic is never
+          the source of truth for what&rsquo;s current — real articles are retrieved from four independent news
+          providers first, and only evidence that survives freshness, relevance, quality, deduplication, and
+          conflict validation is ever shown to the model.
+        </p>
+        <p className="mt-3 font-body text-[15px] leading-relaxed text-muted">
+          Freshness is a rolling <strong>7-day window</strong>, not &ldquo;published today only&rdquo; — an
+          article from three days ago is valid, current evidence, while a source with no parseable publication
+          date, or one older than 7 days, is rejected outright and never counts toward the required evidence.
+          When multiple sources cover the same underlying story but report contradicting figures or dates, that
+          claim is excluded entirely rather than guessed between — the pipeline never merges or silently picks a
+          side of a genuine conflict. A current-state claim in the final article is always backed by one of these
+          verified sources; there is no fallback to the model&rsquo;s own training-data knowledge, and no repair
+          call to patch things up if the initial evidence turns out to be insufficient. If sufficient real
+          evidence can&rsquo;t be found after 3 retrieval attempts, the request fails with{" "}
+          <code className="font-mono">SOURCE_VALIDATION_FAILED</code> — the model is never called at all in that
+          case.
         </p>
 
         <h2 className="mt-10 font-display text-xl font-medium text-ink">What you see in the response</h2>

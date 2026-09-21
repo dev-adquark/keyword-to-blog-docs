@@ -41,6 +41,12 @@ const codes = [
     meaning:
       "Every generation is validated and, if needed, automatically revised by the content quality pipeline before being returned. This means the pipeline could not produce content clearing the quality bar within the configured revision limit.",
   },
+  {
+    code: "SOURCE_VALIDATION_FAILED",
+    status: 422,
+    meaning:
+      "For a freshness-sensitive topic, no sufficient, fresh (within 7 days), relevant, and verifiable source material could be found across all configured news providers after 3 retrieval attempts. The model was never called for this request — see the content quality pipeline docs.",
+  },
   { code: "INTERNAL_ERROR", status: 500, meaning: "An unexpected server error occurred." },
 ] as const;
 

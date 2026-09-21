@@ -17,11 +17,23 @@ describe("evaluateFactuality", () => {
     expect(allText).not.toMatch(/100% (human|verified)/i);
   });
 
-  it('"verified" mode fails honestly rather than fabricating verification, since no source-retrieval exists', () => {
+  it('"verified" mode fails honestly rather than fabricating verification, when NOT source-grounded (the evergreen pipeline has no retrieval capability)', () => {
     const result = evaluateFactuality(baseRequest({ factualityMode: "verified" }));
     expect(result.status).toBe("VERIFICATION_UNAVAILABLE");
     expect(result.failedChecks).toEqual([
       expect.objectContaining({ code: "FACTUALITY_UNVERIFIED", severity: "blocking" }),
     ]);
+  });
+
+  it("REGRESSION: sourceGrounded=true is honestly reported as VERIFIED and never blocked — real source-retrieval now exists and was actually used, so 'verified' mode must not be falsely rejected", () => {
+    const verifiedModeResult = evaluateFactuality(baseRequest({ factualityMode: "verified" }), true);
+    expect(verifiedModeResult.status).toBe("VERIFIED");
+    expect(verifiedModeResult.failedChecks).toHaveLength(0);
+
+    // Even a "standard" mode request reports VERIFIED when it genuinely
+    // went through source retrieval — the true status is always reported.
+    const standardModeResult = evaluateFactuality(baseRequest(), true);
+    expect(standardModeResult.status).toBe("VERIFIED");
+    expect(standardModeResult.failedChecks).toHaveLength(0);
   });
 });

@@ -4,18 +4,25 @@ import { isEnglish } from "./config";
 import { collectSectionProse, splitSentences } from "./textStats";
 
 /**
- * Detects fabricated/unsupported evidence in STANDARD (non-verified)
- * generation mode — content generated from the model's own knowledge must
- * never present invented statistics, studies, or expert consensus as
- * established fact. This is separate from factuality.ts's verified-mode
- * policy: that module governs whether the *deployment* can honestly claim
- * verification happened at all; this one catches the model asserting
- * precise, evidence-flavored claims it can't actually back up, regardless
- * of mode.
+ * Detects fabricated/unsupported evidence — content must never present
+ * invented statistics, studies, or expert consensus as established fact.
+ * This is separate from factuality.ts's verified-mode policy: that module
+ * governs whether the *deployment* can honestly claim verification
+ * happened at all; this one catches the model asserting precise,
+ * evidence-flavored claims it can't actually back up, regardless of mode.
  *
  * Real example this exists to catch: "Professionals who allocate 15-20
  * focused minutes daily... consistently outpace..." — a precise number
  * dressed up as an established behavioral finding, with no source at all.
+ *
+ * For the source-grounded pipeline (sourceGroundedPipeline.ts), pass
+ * `groundingEvidenceText` — the real, retrieved source pack's combined
+ * description/content text. A specific number that genuinely appears in
+ * that real evidence (e.g. a statistic straight from a retrieved article)
+ * is NOT fabricated and must not be blocked just because it happens to
+ * match one of these surface phrasing patterns — real news content
+ * legitimately says things like "a recent survey found 34% of..." when
+ * that is literally what a retrieved, verified source reported.
  */
 export interface EvidenceClaimsResult {
   score: number;
@@ -55,9 +62,22 @@ function findMatches(text: string, patterns: RegExp[]): string[] {
   return hits;
 }
 
+/** True only when the specific number embedded in a flagged statistic/
+ * outcome claim genuinely appears in the real source-pack evidence — i.e.
+ * it traces back to a retrieved source rather than being invented. Exact
+ * substring match on the numeric token is deliberately simple/strict:
+ * a close-but-different number (e.g. claiming 45% when the source said
+ * 34%) still doesn't match and is still correctly flagged. */
+function numberIsGrounded(matchedText: string, groundingEvidenceText: string): boolean {
+  if (!groundingEvidenceText) return false;
+  const numbers = matchedText.match(/\d[\d,.]*%?/g) ?? [];
+  return numbers.length > 0 && numbers.every((n) => groundingEvidenceText.includes(n));
+}
+
 export function evaluateEvidenceClaims(
   request: GenerateRequestV1,
-  post: SEOPostV1
+  post: SEOPostV1,
+  groundingEvidenceText = ""
 ): EvidenceClaimsResult {
   const failed: FailedCheck[] = [];
   const warnings: string[] = [];
@@ -82,7 +102,8 @@ export function evaluateEvidenceClaims(
         });
       }
 
-      if (FABRICATED_STATISTIC_PATTERN.test(sentence)) {
+      const statisticMatch = sentence.match(FABRICATED_STATISTIC_PATTERN);
+      if (statisticMatch && !numberIsGrounded(statisticMatch[0], groundingEvidenceText)) {
         failed.push({
           code: "UNSUPPORTED_EVIDENCE_CLAIM",
           severity: "blocking",
@@ -91,7 +112,8 @@ export function evaluateEvidenceClaims(
         });
       }
 
-      if (PRECISE_UNSOURCED_OUTCOME_PATTERN.test(sentence)) {
+      const outcomeMatch = sentence.match(PRECISE_UNSOURCED_OUTCOME_PATTERN);
+      if (outcomeMatch && !numberIsGrounded(outcomeMatch[0], groundingEvidenceText)) {
         failed.push({
           code: "UNSUPPORTED_EVIDENCE_CLAIM",
           severity: "blocking",
@@ -105,7 +127,9 @@ export function evaluateEvidenceClaims(
   // Also check the conclusion, which often restates a claim from the body.
   const conclusionProse = collectSectionProse([{ contentMarkdown: post.conclusion }]);
   for (const sentence of splitSentences(conclusionProse.join(" "))) {
-    if (findMatches(sentence, UNSOURCED_RESEARCH_CLAIMS).length > 0 || FABRICATED_STATISTIC_PATTERN.test(sentence)) {
+    const conclusionStatisticMatch = sentence.match(FABRICATED_STATISTIC_PATTERN);
+    const groundedStatistic = conclusionStatisticMatch && numberIsGrounded(conclusionStatisticMatch[0], groundingEvidenceText);
+    if (findMatches(sentence, UNSOURCED_RESEARCH_CLAIMS).length > 0 || (conclusionStatisticMatch && !groundedStatistic)) {
       failed.push({
         code: "UNSUPPORTED_EVIDENCE_CLAIM",
         severity: "blocking",

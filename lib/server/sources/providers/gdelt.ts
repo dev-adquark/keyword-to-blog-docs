@@ -23,10 +23,17 @@ interface GdeltArticle {
  * seconds"), so parsing here is defensive — a shape mismatch degrades to
  * zero sources rather than throwing.
  *
- * `seendate` is `YYYYMMDDTHHMMSSZ` — GDELT's own docs describe it as "last
- * time this article was found by GDELT," not strictly first-published time,
- * so it is treated as a rough freshness signal only (see ../freshness.ts,
- * which never treats any single provider as sufficient on its own).
+ * `seendate` (`YYYYMMDDTHHMMSSZ`) is GDELT's own crawl/discovery timestamp
+ * — "the last time this article was found by GDELT" — NOT the article's
+ * actual original publication time. GDELT's DOC 2.0 `artlist` output has no
+ * separate publication-date field to fall back to. Treating `seendate` as
+ * `publishedAt` would let a stale article that GDELT merely re-crawled
+ * recently falsely satisfy the hard freshness requirement, so it is
+ * deliberately left null here rather than guessed: GDELT sources can still
+ * contribute discovery/relevance/evidence, but can never by themselves
+ * satisfy freshness — see ../freshness.ts (missing publishedAt is always
+ * rejected) and ../completeness.ts (other providers must supply the
+ * fresh, dated evidence).
  */
 export class GdeltProvider implements SourceProvider {
   readonly name = "gdelt" as const;
@@ -74,7 +81,10 @@ export class GdeltProvider implements SourceProvider {
           content: null,
           url: a.url!,
           publisher: a.domain ?? null,
-          publishedAt: a.seendate ? parseGdeltSeenDate(a.seendate) : null,
+          // Deliberately not `parseGdeltSeenDate(a.seendate)` — see the
+          // module comment above. `seendate` is discovery time, not
+          // publication time, and is never used to satisfy freshness.
+          publishedAt: null,
           retrievedAt: now,
           language: a.language ?? null,
           category: null,
@@ -90,15 +100,4 @@ export class GdeltProvider implements SourceProvider {
       clearTimeout(timeout);
     }
   }
-}
-
-/** GDELT's seendate is `YYYYMMDDTHHMMSSZ` (e.g. "20260921T120000Z") — not
- * directly parseable by `new Date()`, so reformat to real ISO 8601 first. */
-function parseGdeltSeenDate(raw: string): string | null {
-  const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/.exec(raw.trim());
-  if (!match) return null;
-  const [, year, month, day, hour, minute, second] = match;
-  const iso = `${year}-${month}-${day}T${hour}:${minute}:${second}Z`;
-  const parsed = new Date(iso);
-  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }

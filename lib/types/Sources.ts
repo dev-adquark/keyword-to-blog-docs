@@ -7,7 +7,7 @@
  * circular import, matching the existing pattern in ContentQuality.ts.
  */
 
-export type SourceProviderName = "currents" | "newsdata" | "gdelt";
+export type SourceProviderName = "currents" | "newsdata" | "gdelt" | "newsapi_org";
 
 /** One provider's result, normalized into a common shape — never a raw
  * provider-specific object is passed further down the pipeline. */

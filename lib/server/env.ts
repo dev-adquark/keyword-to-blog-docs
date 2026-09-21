@@ -83,6 +83,9 @@ export const env = {
   get NEWSDATA_API_KEY() {
     return process.env.NEWSDATA_API_KEY || "";
   },
+  get NEWSAPI_ORG_KEY() {
+    return process.env.NEWSAPI_ORG_KEY || "";
+  },
   /** GDELT's DOC 2.0 article search API is free/keyless — this is reserved
    * for a future GDELT credential (e.g. BigQuery) and currently unused. */
   get GDELT_API_TOKEN() {

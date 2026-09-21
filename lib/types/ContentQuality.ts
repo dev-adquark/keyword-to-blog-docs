@@ -46,12 +46,18 @@ export interface RevisionFeedback {
   instructions: string;
 }
 
-export type FactualityStatus = "STANDARD_UNVERIFIED" | "VERIFICATION_UNAVAILABLE";
-/** VERIFIED_CURRENT means the claim was actually grounded in a live web_search
- * result from this same generation/repair call (see freshness.ts) — not
- * merely "no problems detected". UNVERIFIED_BLOCKED now applies regardless of
- * factualityMode, since real grounding is available; it's no longer a
- * capability gap that skips repair (see engine.ts's isUnfixableByRepair). */
+/** VERIFIED means the content was actually generated through the
+ * source-pack-first pipeline (see lib/server/content-quality/
+ * sourceGroundedPipeline.ts) — real, retrieved, freshness-validated
+ * sources, not merely "no problems detected". The evergreen generate/
+ * repair pipeline (lib/server/content-quality/engine.ts) never reports
+ * this — it has no source-retrieval capability of its own. */
+export type FactualityStatus = "STANDARD_UNVERIFIED" | "VERIFICATION_UNAVAILABLE" | "VERIFIED";
+/** VERIFIED_CURRENT means the claim was actually grounded in a real,
+ * retrieved, freshness-validated source pack (see lib/server/sources/ and
+ * lib/server/content-quality/citationIntegrity.ts) — not merely "no
+ * problems detected". The evergreen pipeline (engine.ts) can never report
+ * this; only the source-grounded pipeline can. */
 export type FreshnessStatus = "NOT_APPLICABLE" | "VERIFIED_CURRENT" | "UNVERIFIED_ACCEPTABLE" | "UNVERIFIED_BLOCKED";
 /** Only two outcomes now — see lib/server/content-quality/qualityGate.ts:
  * any blocking failedCheck fails the gate, everything else passes. There is

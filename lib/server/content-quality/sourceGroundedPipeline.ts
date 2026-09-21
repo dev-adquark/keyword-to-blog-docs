@@ -31,13 +31,35 @@ export class SourceValidationFailedError extends ApiError {
   report: SourceRetrievalReport;
 
   constructor(report: SourceRetrievalReport) {
+    // report.sourcePack always holds the LAST attempt's actual built pack
+    // (see retrieveValidatedSourcePack — it is never discarded/nulled out
+    // on failure), so these reasons are never silently empty when the
+    // pipeline genuinely knows why it failed.
+    const lastAttemptFailureReasons = report.sourcePack?.failureReasons ?? [];
+    const lastAttemptRejectedSourceReasons = [
+      ...new Set((report.sourcePack?.rejectedSources ?? []).map((r) => r.reason)),
+    ];
     super(
       "SOURCE_VALIDATION_FAILED",
       "No sufficient, fresh, relevant, and verifiable source material could be found for this topic after 3 retrieval attempts. Anthropic was not called.",
       {
         attempts: report.attempts.length,
         freshnessPolicy: report.freshnessPolicy,
-        lastAttemptFailureReasons: report.sourcePack?.failureReasons ?? [],
+        lastAttemptFailureReasons,
+        lastAttemptRejectedSourceReasons,
+        // Full per-attempt trail — provider status/errors, how many
+        // candidates each attempt retrieved vs. approved, and the
+        // PASS/FAIL result of each. Never includes secret values (provider
+        // API keys are never part of this shape — see SourceRetrievalReport).
+        attemptLog: report.attempts.map((a) => ({
+          attempt: a.attempt,
+          query: a.query,
+          providersQueried: a.providersQueried,
+          providerErrors: a.providerErrors,
+          candidatesRetrieved: a.candidatesRetrieved,
+          candidatesApproved: a.candidatesApproved,
+          result: a.result,
+        })),
       }
     );
     this.report = report;
@@ -65,6 +87,7 @@ function validateSourceGrounded(
 ): ContentQualityReport {
   const brief = buildContentBrief(request);
   const citation = evaluateCitationIntegrity(post, pack);
+  const groundingEvidenceText = pack.sources.map((s) => `${s.description ?? ""} ${s.content ?? ""}`).join(" ");
 
   const writing = evaluateWritingQuality(post, request.language);
   const originality = evaluateOriginality(post);
@@ -74,8 +97,8 @@ function validateSourceGrounded(
   const keyword = evaluateKeywordQuality(post, brief);
   const structure = evaluateStructure(post);
   const spam = evaluateSpamSignals(post, brief, request.language);
-  const factuality = evaluateFactuality(request);
-  const evidence = evaluateEvidenceClaims(request, post);
+  const factuality = evaluateFactuality(request, true); // real, retrieved, freshness-validated sources — genuinely verified
+  const evidence = evaluateEvidenceClaims(request, post, groundingEvidenceText);
 
   const freshnessStatus: FreshnessStatus = citation.failedChecks.length === 0 ? "VERIFIED_CURRENT" : "UNVERIFIED_BLOCKED";
   const freshness = { status: freshnessStatus, failedChecks: citation.failedChecks, warnings: citation.warnings };

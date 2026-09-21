@@ -15,6 +15,25 @@ describe("evaluateKeywordQuality", () => {
     expect(result.failedChecks.some((f) => f.code === "MISSING_PRIMARY_KEYWORD")).toBe(true);
   });
 
+  it("REGRESSION: does not block a genuinely on-topic article just because it paraphrases the exact keyword phrase (plural vs. singular, different word order)", () => {
+    const post = goodPost({
+      title: "How to Build a Strong Password",
+      sections: [
+        {
+          type: "body",
+          heading: "Building strong passwords",
+          contentMarkdown:
+            "A strong password is your first line of defense. Using a strong password consistently across every account, rather than a weak password reused everywhere, meaningfully reduces the risk of a breach.",
+        },
+      ],
+    });
+    // Primary keyword is the plural "strong passwords" — the article
+    // naturally uses the singular "strong password" throughout, which is
+    // clearly the same topic and should not be treated as missing.
+    const result = evaluateKeywordQuality(post, baseBrief({ primaryKeyword: "strong passwords" }));
+    expect(result.failedChecks.some((f) => f.code === "MISSING_PRIMARY_KEYWORD")).toBe(false);
+  });
+
   it("flags keyword stuffing when density is unnaturally high", () => {
     const stuffed = Array.from({ length: 15 }, () => "strong password strong password strong password").join(" ");
     const post = goodPost({

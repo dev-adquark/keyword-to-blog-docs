@@ -111,8 +111,21 @@ describe("runSourceGroundedPipeline", () => {
 
     expect(report.overallStatus).toBe("PASS");
     expect(report.freshnessStatus).toBe("VERIFIED_CURRENT");
+    expect(report.factualityStatus).toBe("VERIFIED");
     expect(report.revisionCount).toBe(0);
     expect(rewriteFromSourcePack).toHaveBeenCalledTimes(1);
+  });
+
+  it("REGRESSION: factualityMode 'verified' no longer falsely blocks a successful source-grounded generation — real source-retrieval now exists and was actually used", async () => {
+    const pack = sourcePack();
+    vi.mocked(retrieveValidatedSourcePack).mockResolvedValue(passingReport(pack));
+    vi.mocked(rewriteFromSourcePack).mockResolvedValue(
+      goodPost({ sources: [{ title: "Real source title", url: "https://example.com/real-source", publishedAt: pack.sources[0]!.publishedAt }] })
+    );
+
+    const { report } = await runSourceGroundedPipeline(baseRequest({ factualityMode: "verified" }), "req_1");
+    expect(report.overallStatus).toBe("PASS");
+    expect(report.factualityStatus).toBe("VERIFIED");
   });
 
   it("fails closed (never a second Anthropic call) when the rewrite cites a URL not in the source pack", async () => {

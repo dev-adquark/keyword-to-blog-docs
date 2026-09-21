@@ -21,7 +21,12 @@ const GENERIC_INTRO_PATTERNS = [
   /\bin an increasingly\b/i,
   /\bin the (?:ever-changing|fast-paced|rapidly evolving) world of\b/i,
   /\bin the world of\b/i,
-  /\bwhether you(?:'re| are)\b.*\bor\b/i,
+  // "Whether you're X or Y" is a legitimate, often well-executed rhetorical
+  // device when X/Y are specific (e.g. "whether you're managing a 5-person
+  // team or running global operations") — only the genuinely generic,
+  // vague-placeholder version (beginner/expert/pro/novice/newbie) is
+  // flagged, not the construction itself.
+  /\bwhether you(?:'re| are)\s+(?:a\s+|an\s+)?(?:beginner|expert|pro|novice|newbie|seasoned|amateur|veteran|new|experienced|small|large|big)\b[^.!?]{0,20}\bor\b/i,
   /\bit'?s no secret that\b/i,
   /\bhave you ever wondered\b/i,
 ];
