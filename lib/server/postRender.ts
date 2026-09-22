@@ -19,6 +19,7 @@ export function countWords(post: SEOPostV1): number {
 const MARKDOWN_LINK_PATTERN = /\[([^\]]*)\]\((?:https?:\/\/|mailto:)[^\s)]+\)/gi;
 const HTML_ANCHOR_PATTERN = /<a\b[^>]*>([\s\S]*?)<\/a>/gi;
 const RAW_URL_PATTERN = /\bhttps?:\/\/\S+/gi;
+const WWW_PATTERN = /\bwww\.\S+/gi;
 const CITATION_BRACKET_PATTERN = /\[\d+\]/g;
 const SOURCE_ATTRIBUTION_PATTERN = /\((?:source|sources|via|credit|citation)s?:?[^)]*\)/gi;
 /** A heading that IS (not merely mentions) a sources/references section. */
@@ -42,6 +43,7 @@ export function stripLinksAndCitations(text: string): string {
     .replace(SOURCE_ATTRIBUTION_PATTERN, "")
     .replace(CITATION_BRACKET_PATTERN, "")
     .replace(RAW_URL_PATTERN, "")
+    .replace(WWW_PATTERN, "")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ +([.,;:!?])/g, "$1")
     .replace(/\(\s*\)/g, "")

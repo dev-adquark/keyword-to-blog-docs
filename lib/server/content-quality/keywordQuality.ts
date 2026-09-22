@@ -1,7 +1,8 @@
 import "server-only";
 import type { ContentBrief, FailedCheck, SEOPostV1 } from "@/lib/types";
 import { KEYWORD_STUFFING } from "./config";
-import { countPhraseOccurrences, tokenizeWords, wordCount, collectSectionProse } from "./textStats";
+import { countPhraseOccurrences, wordCount, collectSectionProse } from "./textStats";
+import { significantTerms as significantTermsOf } from "../sources/textSimilarity";
 
 /** Tolerates a trivial singular/plural mismatch ("vehicle" vs. "vehicles")
  * — mirrors lib/server/sources/relevance.ts's fix for the same problem on
@@ -10,10 +11,6 @@ function containsTermTolerant(haystackLower: string, term: string): boolean {
   if (haystackLower.includes(term)) return true;
   if (term.endsWith("s") && term.length > 3) return haystackLower.includes(term.slice(0, -1));
   return haystackLower.includes(`${term}s`);
-}
-
-function significantTermsOf(phrase: string): string[] {
-  return [...new Set(tokenizeWords(phrase).filter((w) => w.length > 2 || /\d/.test(w)))];
 }
 
 /**

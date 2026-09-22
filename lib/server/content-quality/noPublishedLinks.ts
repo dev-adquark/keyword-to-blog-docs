@@ -8,17 +8,26 @@ export interface NoPublishedLinksResult {
 }
 
 const URL_PATTERN = /https?:\/\/\S+/i;
+const WWW_PATTERN = /\bwww\.\S+/i;
 const MARKDOWN_LINK_PATTERN = /\[[^\]]*\]\((?:https?:\/\/|mailto:)[^\s)]+\)/i;
 const HTML_ANCHOR_PATTERN = /<a\b[^>]*>/i;
+const CITATION_BRACKET_PATTERN = /\[\d+\]/;
+const SOURCE_ATTRIBUTION_PATTERN = /\((?:source|sources|via|credit|citation)s?:?[^)]*\)/i;
 const SOURCES_HEADING_PATTERN = /^(sources?|references?|citations?|further reading|works cited)\s*:?$/i;
 
 function findLinkLikeMatch(text: string): string | null {
   const urlMatch = text.match(URL_PATTERN);
   if (urlMatch) return urlMatch[0];
+  const wwwMatch = text.match(WWW_PATTERN);
+  if (wwwMatch) return wwwMatch[0];
   const mdMatch = text.match(MARKDOWN_LINK_PATTERN);
   if (mdMatch) return mdMatch[0];
   const anchorMatch = text.match(HTML_ANCHOR_PATTERN);
   if (anchorMatch) return anchorMatch[0];
+  const citationMatch = text.match(CITATION_BRACKET_PATTERN);
+  if (citationMatch) return citationMatch[0];
+  const attributionMatch = text.match(SOURCE_ATTRIBUTION_PATTERN);
+  if (attributionMatch) return attributionMatch[0];
   return null;
 }
 

@@ -17,6 +17,7 @@ import { evaluateFactuality } from "./factuality";
 import { evaluateEvidenceClaims } from "./evidenceClaims";
 import { evaluateCitationIntegrity } from "./citationIntegrity";
 import { evaluateNoPublishedLinks } from "./noPublishedLinks";
+import { evaluateSourceOriginality } from "./sourceOriginality";
 import { buildQualityReport } from "./scoring";
 import { decideQualityGate } from "./qualityGate";
 import { applyDeterministicFixes } from "./autoFix";
@@ -99,6 +100,7 @@ function validateSourceGrounded(
 
   const writing = evaluateWritingQuality(post, request.language);
   const originality = evaluateOriginality(post);
+  const sourceOriginality = evaluateSourceOriginality(post, pack);
   const depth = evaluateDepth(post, brief);
   const seo = evaluateSeoQuality(post, brief);
   const readability = evaluateReadability(post, brief);
@@ -117,7 +119,7 @@ function validateSourceGrounded(
       wordCount: countWords(post),
       keywordCoverage: keyword.keywordCoverage,
       revisionCount: 0,
-      outputs: { writing, originality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence, noPublishedLinks },
+      outputs: { writing, originality, sourceOriginality, depth, seo, readability, keyword, structure, spam, factuality, freshness, evidence, noPublishedLinks },
     })
   );
 }

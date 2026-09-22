@@ -34,6 +34,28 @@ describe("evaluateKeywordQuality", () => {
     expect(result.failedChecks.some((f) => f.code === "MISSING_PRIMARY_KEYWORD")).toBe(false);
   });
 
+  it("REGRESSION: does not require the literal word 'today' to appear — a freshness-sensitive topic like 'stock market today' can be genuinely on-topic without that exact word (e.g. when accurately dated content spans several days, not literally 'today')", () => {
+    const post = goodPost({
+      title: "Global Markets Rally on Oil Retreat and Tech Strength",
+      sections: [
+        {
+          type: "body",
+          heading: "Markets this week",
+          contentMarkdown:
+            "Financial markets have entered a rally phase this week, buoyed by declining oil prices and resurgent strength in the stock market. The broader market has continued its advance across multiple sessions.",
+        },
+      ],
+      conclusion: "The stock market's rally reflects renewed investor confidence heading into the final quarter.",
+    });
+    // Found live: this was a real production bug, discovered via a real
+    // generation where the rewriter (correctly) avoided the word "today"
+    // because the 7-day source pack wasn't all from today, which then
+    // falsely triggered MISSING_PRIMARY_KEYWORD on "today" alone even
+    // though the article was clearly, thoroughly about the stock market.
+    const result = evaluateKeywordQuality(post, baseBrief({ primaryKeyword: "stock market today" }));
+    expect(result.failedChecks.some((f) => f.code === "MISSING_PRIMARY_KEYWORD")).toBe(false);
+  });
+
   it("flags keyword stuffing when density is unnaturally high", () => {
     const stuffed = Array.from({ length: 15 }, () => "strong password strong password strong password").join(" ");
     const post = goodPost({
