@@ -107,6 +107,48 @@ describe("POST /v1/generate — content quality pipeline wiring", () => {
     expect(body.quality).toEqual({ status: "pass", score: 92, revisionCount: 0, qualityVersion: "2.0.0" });
   });
 
+  it("REGRESSION: accepts a request with no constraints.maxWords at all — it's optional now, not required", async () => {
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({ post: validPost, report: passingReport });
+
+    const bodyWithoutMaxWords = {
+      keywords: ["strong password"],
+      language: "en",
+      tone: "professional",
+      constraints: {},
+      format: { responseTypes: ["json"] },
+    };
+    const res = await POST(generateRequest(bodyWithoutMaxWords));
+
+    expect(res.status).toBe(200);
+    expect(runContentQualityPipeline).toHaveBeenCalledTimes(1);
+  });
+
+  it("REGRESSION: never rejects for exceeding the plan's maxWordsPerRequest cap when maxWords is omitted (nothing to compare)", async () => {
+    vi.mocked(authenticate).mockResolvedValue({
+      ok: true,
+      context: {
+        requestId: "req_1",
+        apiKey: { id: "key_1" } as never,
+        customer: { id: "cus_1" } as never,
+        plan: { maxWordsPerRequest: 800 } as never, // lowest real plan tier
+      },
+      rateLimitHeaders: {},
+    });
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({ post: validPost, report: passingReport });
+
+    const res = await POST(
+      generateRequest({
+        keywords: ["strong password"],
+        language: "en",
+        tone: "professional",
+        constraints: {},
+        format: { responseTypes: ["json"] },
+      })
+    );
+
+    expect(res.status).toBe(200);
+  });
+
   it("records exactly ONE usage event per external request, regardless of internal repair", async () => {
     vi.mocked(runContentQualityPipeline).mockResolvedValue({
       post: validPost,

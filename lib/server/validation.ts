@@ -13,7 +13,7 @@ export const generateRequestSchema = z
     targetUrl: z.string().url().max(2048).optional(),
     factualityMode: z.enum(["standard", "verified"]).optional(),
     constraints: z.object({
-      maxWords: z.number().int().min(100).max(8000),
+      maxWords: z.number().int().min(100).max(8000).optional(),
       minWords: z.number().int().min(50).optional(),
       maxSections: z.number().int().min(1).max(20).optional(),
       includeFAQs: z.boolean().optional(),
@@ -29,7 +29,10 @@ export const generateRequestSchema = z
     clientProvidedRequestId: z.string().max(255).optional(),
   })
   .refine(
-    (data) => data.constraints.minWords === undefined || data.constraints.minWords <= data.constraints.maxWords,
+    (data) =>
+      data.constraints.minWords === undefined ||
+      data.constraints.maxWords === undefined ||
+      data.constraints.minWords <= data.constraints.maxWords,
     {
       message: "constraints.minWords must not exceed constraints.maxWords.",
       path: ["constraints", "minWords"],

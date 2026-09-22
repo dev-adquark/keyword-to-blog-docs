@@ -46,7 +46,7 @@ export async function POST(req: Request) {
     }
     generateRequest = parsed.data;
 
-    if (generateRequest.constraints.maxWords > context.plan.maxWordsPerRequest) {
+    if (generateRequest.constraints.maxWords !== undefined && generateRequest.constraints.maxWords > context.plan.maxWordsPerRequest) {
       throw new ApiError(
         "VALIDATION_ERROR",
         `constraints.maxWords exceeds the plan limit of ${context.plan.maxWordsPerRequest} words per request.`,

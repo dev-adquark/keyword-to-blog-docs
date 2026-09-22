@@ -4,7 +4,6 @@ import {
   renderHtml,
   countWords,
   enforceSectionConstraint,
-  assertWordCountWithinTolerance,
   stripSourceContent,
   stripLinksAndCitations,
 } from "@/lib/server/postRender";
@@ -80,7 +79,7 @@ describe("enforceSectionConstraint", () => {
     expect(result.sections).toHaveLength(2);
   });
 
-  it("REGRESSION: grows back past maxSections rather than truncating a valid article below minWords", () => {
+  it("REGRESSION: maxWords/minWords no longer affect truncation at all — only maxSections does", () => {
     const post = makePost({
       sections: [
         { type: "introduction", contentMarkdown: "one two three four five six seven eight nine ten." },
@@ -89,93 +88,12 @@ describe("enforceSectionConstraint", () => {
       ],
       conclusion: "",
     });
-    // maxSections: 1 would leave only 10 words, well under minWords: 25 —
-    // truncation must keep growing until the total clears the minimum.
-    const result = enforceSectionConstraint(post, { maxWords: 1000, minWords: 25, maxSections: 1 });
-    expect(result.sections.length).toBeGreaterThan(1);
-    expect(countWords(result)).toBeGreaterThanOrEqual(25);
-  });
-
-  it("still truncates to maxSections when doing so already satisfies minWords", () => {
-    const post = makePost({
-      sections: [
-        { type: "introduction", contentMarkdown: "one two three four five six seven eight nine ten." },
-        { type: "body", contentMarkdown: "eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty." },
-        { type: "body", contentMarkdown: "extra section that would be cut." },
-      ],
-      conclusion: "",
-    });
-    const result = enforceSectionConstraint(post, { maxWords: 1000, minWords: 15, maxSections: 2 });
-    expect(result.sections).toHaveLength(2);
-  });
-});
-
-describe("assertWordCountWithinTolerance", () => {
-  it("does not throw for a reasonable word count", () => {
-    expect(() => assertWordCountWithinTolerance(1000, { maxWords: 1000 })).not.toThrow();
-    expect(() => assertWordCountWithinTolerance(1400, { maxWords: 1000 })).not.toThrow(); // 40% over, within tolerance
-  });
-
-  it("throws when egregiously (50%+) over maxWords, rather than silently returning it", () => {
-    expect(() => assertWordCountWithinTolerance(1600, { maxWords: 1000 })).toThrow();
-  });
-
-  it("throws when egregiously under minWords", () => {
-    expect(() => assertWordCountWithinTolerance(20, { maxWords: 1000, minWords: 100 })).toThrow();
-  });
-
-  it("does not throw when minWords is unset", () => {
-    expect(() => assertWordCountWithinTolerance(1, { maxWords: 1000 })).not.toThrow();
-  });
-
-  it("passes cleanly for a word count within the requested range", () => {
-    expect(() => assertWordCountWithinTolerance(650, { maxWords: 900, minWords: 500 })).not.toThrow();
-  });
-
-  it("REGRESSION: reports exact diagnostics (actual/min/max words) on failure, not just a generic message", () => {
-    try {
-      assertWordCountWithinTolerance(20, { maxWords: 900, minWords: 500 });
-      throw new Error("expected assertWordCountWithinTolerance to throw");
-    } catch (err) {
-      const apiErr = err as { message: string; details?: Record<string, unknown> };
-      expect(apiErr.message).toMatch(/20/);
-      expect(apiErr.message).toMatch(/500/);
-      expect(apiErr.message).toMatch(/900/);
-      expect(apiErr.details).toEqual({ actualWords: 20, minWords: 500, maxWords: 900 });
-    }
-  });
-
-  it("REGRESSION: reports exact diagnostics on an over-budget failure too", () => {
-    try {
-      assertWordCountWithinTolerance(2000, { maxWords: 900 });
-      throw new Error("expected assertWordCountWithinTolerance to throw");
-    } catch (err) {
-      const apiErr = err as { message: string; details?: Record<string, unknown> };
-      expect(apiErr.message).toMatch(/2000/);
-      expect(apiErr.message).toMatch(/900/);
-      expect(apiErr.details).toEqual({ actualWords: 2000, minWords: null, maxWords: 900 });
-    }
-  });
-
-  it("REGRESSION (end-to-end): a post whose section prose alone looks short does not falsely fail minWords once conclusion/FAQs/callouts are correctly counted", () => {
-    // Reproduces the real reported bug: countWords() used to only count
-    // section.contentMarkdown, silently ignoring the conclusion and every
-    // FAQ, so a genuinely long-enough article could look like it fell
-    // under half of minWords and fail with INTERNAL_ERROR.
-    const post = makePost({
-      sections: [
-        { type: "introduction", contentMarkdown: Array(60).fill("word").join(" ") },
-        { type: "body", contentMarkdown: "Short body.", callout: { label: "Note", text: Array(20).fill("word").join(" ") } },
-      ],
-      faqs: [
-        { question: "First question?", answer: Array(40).fill("word").join(" ") },
-        { question: "Second question?", answer: Array(40).fill("word").join(" ") },
-      ],
-      conclusion: Array(30).fill("word").join(" "),
-    });
-    const words = countWords(post);
-    expect(words).toBeGreaterThanOrEqual(190); // 60+2+1+20+2+40+2+40+30 ≈ 197, well over half of 300
-    expect(() => assertWordCountWithinTolerance(words, { maxWords: 400, minWords: 300 })).not.toThrow();
+    // No length-based validation exists anymore: maxSections truncates to
+    // exactly that count regardless of what that does to word count, and a
+    // stray minWords on the constraints object (if a caller still sends
+    // one) has zero effect.
+    const result = enforceSectionConstraint(post, { maxWords: 1000, minWords: 500, maxSections: 1 });
+    expect(result.sections).toHaveLength(1);
   });
 });
 

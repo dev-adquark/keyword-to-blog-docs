@@ -48,6 +48,16 @@ describe("generateRequestSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  it("REGRESSION: accepts a request with maxWords omitted entirely — it is optional, not required", () => {
+    const result = generateRequestSchema.safeParse({ ...valid, constraints: {} });
+    expect(result.success).toBe(true);
+  });
+
+  it("REGRESSION: accepts minWords with no maxWords present (nothing to compare against)", () => {
+    const result = generateRequestSchema.safeParse({ ...valid, constraints: { minWords: 500 } });
+    expect(result.success).toBe(true);
+  });
+
   it("accepts a request with no minWords at all", () => {
     expect(generateRequestSchema.safeParse(valid).success).toBe(true);
   });

@@ -3,7 +3,7 @@ import type { ContentQualityReport, FreshnessStatus, GenerateRequestV1, SEOPostV
 import { ApiError } from "../apiErrors";
 import { retrieveValidatedSourcePack } from "../sources/retrieve";
 import { rewriteFromSourcePack } from "../generation/rewriter";
-import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance, stripSourceContent } from "../postRender";
+import { enforceSectionConstraint, countWords, stripSourceContent } from "../postRender";
 import { buildContentBrief } from "./contentBrief";
 import { evaluateWritingQuality } from "./writingQuality";
 import { evaluateOriginality } from "./originality";
@@ -74,11 +74,9 @@ function finalizePost(post: SEOPostV1, request: GenerateRequestV1): SEOPostV1 {
   // contain a source link/URL/citation, regardless of prompt compliance.
   // post.sources (the internal citation-tracking/validation array checked
   // by citationIntegrity.ts below) is untouched by this — only the
-  // rendered prose fields are stripped. Runs before the word-count check
-  // so the check reflects the real, final word count.
-  const stripped = stripSourceContent(constrained);
-  assertWordCountWithinTolerance(countWords(stripped), request.constraints);
-  return stripped;
+  // rendered prose fields are stripped. Content length is never validated
+  // or rejected — content publishes at whatever length the model produces.
+  return stripSourceContent(constrained);
 }
 
 function withStatus(report: Omit<ContentQualityReport, "overallStatus">): ContentQualityReport {

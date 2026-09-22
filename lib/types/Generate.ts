@@ -21,7 +21,7 @@ export interface GenerateRequestV1 {
    */
   factualityMode?: "standard" | "verified";
   constraints: {
-    maxWords: number;
+    maxWords?: number;
     minWords?: number;
     maxSections?: number;
     includeFAQs?: boolean;

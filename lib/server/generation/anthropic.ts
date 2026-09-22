@@ -70,8 +70,6 @@ Respond with ONLY a JSON object matching exactly this TypeScript shape:
   "coverageNotes"?: { "keywordCoverage": Array<{ "keyword": string, "covered": boolean, "evidence": string }> }
 }
 
-Length: the user message gives you a minimum and/or maximum word count for the total published article (every section's body text, callouts, FAQs, and the conclusion combined — not the title or headings). Treat both as real, hard targets: falling noticeably short of the minimum is as much a failure as blowing past the maximum. If a section feels thin, add genuine depth (more concrete detail, examples, mechanisms) rather than turning in a short article — never pad with filler or generic restatement to hit the count.
-
 Writing quality requirements: avoid generic openings ("in today's digital world", "in an increasingly..."), avoid generic closings ("in conclusion", "by following these tips"), avoid filler phrases ("it is important to note"), avoid restating the same point in different words, avoid keyword stuffing, and give concrete, specific guidance (real mechanisms, tradeoffs, and examples) rather than vague claims. Do not open more than one section with the same shallow "The [thing] is/lies/transforms..." construction — vary how each section starts. Do not repeat the same corporate buzzword (e.g. "seamless", "robust", "leverage") more than once or twice across the whole article. Never fabricate facts, sources, citations, statistics, or quotes, and never present a claim as independently verified, backed by "studies" or "experts", or as a precise guaranteed outcome (e.g. a specific percentage or a "consistently outperforms" claim) unless it is genuinely common, uncontroversial knowledge — when in doubt, phrase it as a general, hedged observation instead.
 
 Currency of information: the user message tells you today's real date. Never state something as "the latest", "currently", "as of today/this year", or otherwise time-specific unless it is genuinely stable, well-established knowledge that does not change — you have no way to verify a real current price, version, statistic, or recent event in this conversation, so never guess one. If the topic calls for that kind of current information, write general, evergreen guidance instead and avoid a specific current-state claim entirely.
@@ -89,8 +87,6 @@ ${req.targetAudience ? `Target audience: ${req.targetAudience}` : ""}
 ${req.brandVoice ? `Brand voice: ${req.brandVoice}` : ""}
 ${req.industry ? `Industry: ${req.industry}` : ""}
 ${req.targetUrl ? `Target URL to support (do not fabricate claims about it): ${req.targetUrl}` : ""}
-Max words: ${req.constraints.maxWords}
-${req.constraints.minWords ? `Min words: ${req.constraints.minWords}` : ""}
 ${req.constraints.maxSections ? `Max sections: ${req.constraints.maxSections}` : ""}
 Include FAQs: ${req.constraints.includeFAQs ? "yes" : "no"}
 ${req.constraints.includeInternalLinksPlaceholders ? "Include placeholder markers like [INTERNAL LINK: <anchor text>] where an internal link would naturally go." : ""}
@@ -151,16 +147,16 @@ ${contextGuidance(context)}`;
 }
 
 /**
- * A flat 4096-token cap silently truncates the model's JSON mid-object for
- * larger `maxWords` requests (or occasionally even moderate ones, since the
- * model doesn't always honor "max words" precisely) — discovered via a live
- * smoke test where a ~400-word request truncated before the required
- * `conclusion` field. Scaled generously (JSON structure/headings/meta add
- * real overhead beyond prose word count), with the previous 4096 as a floor
- * so small requests are unaffected, and 8192 as a ceiling most Claude models support.
+ * Content length is no longer targeted or validated (see postRender.ts —
+ * word-count constraints were removed so content publishes regardless of
+ * length), so this always allows the full ceiling most Claude models
+ * support rather than scaling down for a smaller request — a flat, smaller
+ * cap risks silently truncating the model's JSON mid-object (discovered
+ * via a live smoke test where a shorter response truncated before the
+ * required `conclusion` field).
  */
-function maxTokensForWordBudget(maxWords: number): number {
-  return Math.min(8192, Math.max(4096, Math.ceil(maxWords * 4)));
+function maxTokensForWordBudget(): number {
+  return 8192;
 }
 
 /** A repair patch only ever contains a handful of sections plus a few short
@@ -177,7 +173,7 @@ export class AnthropicProvider implements AIProvider {
     return runWithRetries({
       prompt: buildPrompt(request, context),
       system: STABLE_GENERATION_SYSTEM_PROMPT,
-      maxTokens: maxTokensForWordBudget(request.constraints.maxWords),
+      maxTokens: maxTokensForWordBudget(),
       schema: seoPostSchema,
       schemaFailureMessage: "generation_schema_validation_failed",
       finalFailureMessage: "generation_provider_failure",

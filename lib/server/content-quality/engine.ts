@@ -2,7 +2,7 @@ import "server-only";
 import type { ContentQualityReport, ContentQualitySummary, GenerateRequestV1, SEOPostV1 } from "@/lib/types";
 import { getAIProvider } from "../generation/anthropic";
 import type { AIProvider } from "../generation/provider";
-import { enforceSectionConstraint, countWords, assertWordCountWithinTolerance, stripSourceContent } from "../postRender";
+import { enforceSectionConstraint, countWords, stripSourceContent } from "../postRender";
 import { buildContentBrief } from "./contentBrief";
 import { buildSeoPlan } from "./seoPlan";
 import { evaluateWritingQuality } from "./writingQuality";
@@ -72,12 +72,11 @@ function finalizePost(post: SEOPostV1, request: GenerateRequestV1): SEOPostV1 {
   const constrained = enforceSectionConstraint(post, request.constraints);
   // Unconditional final safety layer — published content must never
   // contain a source link/URL/citation, regardless of prompt compliance.
-  // Runs before the word-count check so the check reflects the real,
-  // final word count. post.sources (internal citation metadata) is
-  // untouched — see stripSourceContent's own docs in postRender.ts.
-  const stripped = stripSourceContent(constrained);
-  assertWordCountWithinTolerance(countWords(stripped), request.constraints);
-  return stripped;
+  // post.sources (internal citation metadata) is untouched — see
+  // stripSourceContent's own docs in postRender.ts. Content length is never
+  // validated or rejected — content publishes at whatever length the
+  // model produces (see postRender.ts's module comment).
+  return stripSourceContent(constrained);
 }
 
 function withStatus(report: Omit<ContentQualityReport, "overallStatus">): ContentQualityReport {

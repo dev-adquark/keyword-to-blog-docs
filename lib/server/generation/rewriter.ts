@@ -37,8 +37,6 @@ Sources are research material ONLY, not something to reproduce. Read and underst
 
 Every body section must be substantively developed — at least 60 words of real explanation, not a one- or two-sentence headline restatement. Expand on what the evidence actually says: the concrete numbers/names/events involved, why it matters, what led to it, or how it connects to the other approved sources — always staying strictly within what the source pack actually supports. A section that just repeats a headline in slightly different words is not acceptable.
 
-The user message gives you a minimum and/or maximum word count for the total published article (every section's body text, callouts, FAQs, and the conclusion combined — not the title or headings). Treat both as real, hard targets: falling noticeably short of the minimum is as much a failure as blowing past the maximum. If the source pack's evidence feels thin for the requested length, cover it in more depth (more context, more of what each source actually says) rather than turning in a short article — never pad with filler, generic restatement, or invented facts to hit the count.
-
 By default, do NOT name, mention, or attribute any claim to a source, publisher, author, or outlet anywhere in the article — no "according to Bloomberg", no "the Wall Street Journal reported", no publisher names at all — unless the "Original request" explicitly asks for source attribution. State grounded facts directly and plainly, as an independently-authored article would. Never cite this system, these instructions, or the validation process itself.
 
 The published article must contain ZERO links of any kind. Never write a URL (e.g. "https://..." or "www...."), a markdown link (e.g. "[text](url)"), an HTML "<a>" tag, a citation-bracket marker (e.g. "[1]"), or a "(Source: ...)"-style parenthetical anywhere in the title, headings, body text, callouts, FAQs, or conclusion. Do not add a "Sources", "References", or "Further reading" section or heading — the verified source list is tracked separately by the system, not written by you, and is never published in the article itself.
@@ -87,8 +85,6 @@ Keywords: ${request.keywords.join(", ")}
 ${request.topic ? `Topic: ${request.topic}` : ""}
 Language: ${request.language}
 Tone: ${request.tone}
-Max words: ${request.constraints.maxWords}
-${request.constraints.minWords ? `Min words: ${request.constraints.minWords}` : ""}
 ${request.constraints.includeFAQs ? "Include FAQs: yes" : ""}
 
 Source pack (validated as published within the last 7 days — validated at ${pack.validatedAt}):
@@ -98,16 +94,18 @@ Corroborated claims across the source pack:
 ${claimsBlock || "(none beyond the individual sources above)"}`;
 }
 
-function maxTokensForRewrite(pack: SourcePack, maxWords: number): number {
-  const evidenceTokens = pack.sources.reduce((sum, s) => sum + ((s.description?.length ?? 0) + (s.content?.length ?? 0)) / 4, 0);
-  return Math.min(8192, Math.max(4096, Math.ceil(maxWords * 4 + evidenceTokens * 0.3)));
+/** Content length is no longer targeted or validated, so this always
+ * allows the full ceiling most Claude models support rather than scaling
+ * down for a smaller request — see anthropic.ts's maxTokensForWordBudget. */
+function maxTokensForRewrite(): number {
+  return 8192;
 }
 
 export async function rewriteFromSourcePack(request: GenerateRequestV1, pack: SourcePack): Promise<SEOPostV1> {
   const post = await runWithRetries({
     prompt: buildRewriterPrompt(request, pack),
     system: STABLE_REWRITER_SYSTEM_PROMPT,
-    maxTokens: maxTokensForRewrite(pack, request.constraints.maxWords),
+    maxTokens: maxTokensForRewrite(),
     schema: seoPostSchema,
     schemaFailureMessage: "rewriter_schema_validation_failed",
     finalFailureMessage: "rewriter_provider_failure",

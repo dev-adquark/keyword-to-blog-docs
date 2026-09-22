@@ -1,11 +1,15 @@
 import "server-only";
 import type { SEOPostV1, GenerateRequestV1 } from "@/lib/types";
-import { ApiError } from "./apiErrors";
 
 /**
  * Canonical rendering + post-generation constraint enforcement for a
  * generated post. Single source of truth used by both the synchronous
  * /v1/generate route and the async job processor — these must never drift.
+ * Content length/word count is never targeted, validated, or truncated —
+ * content publishes at whatever length the model naturally produces,
+ * regardless of `constraints.maxWords`/`minWords` (kept on the request type
+ * only for the separate, unrelated per-plan billing cap — see
+ * app/api/v1/generate/route.ts).
  */
 
 /** Canonical word count — the ONE function used for metering, constraint
@@ -106,15 +110,10 @@ export function stripSourceContent(post: SEOPostV1): SEOPostV1 {
 /**
  * Deterministically enforces `maxSections` by truncating (no extra AI
  * call — a retry would double the API cost for a structural constraint we
- * can safely satisfy ourselves). `maxSections` is a soft structural
- * preference; `minWords` is a hard content-quality requirement, so
- * truncation keeps growing past `maxSections` (up to the model's full
- * output) rather than cutting away enough real prose to fail `minWords` —
- * blindly truncating to the exact section count was the bug: a genuinely
- * valid, long-enough generation could be cut down to fewer words than
- * requested purely because of where the model happened to place its
- * section breaks. Final word count is still checked separately via
- * `assertWordCountWithinTolerance`.
+ * can safely satisfy ourselves). This is a structural constraint only —
+ * content length/word count is no longer targeted or validated at all (see
+ * the module comment above): content publishes at whatever length the
+ * model naturally produces.
  */
 export function enforceSectionConstraint(
   post: SEOPostV1,
@@ -123,40 +122,7 @@ export function enforceSectionConstraint(
   if (!constraints.maxSections || post.sections.length <= constraints.maxSections) {
     return post;
   }
-
-  let sectionCount = constraints.maxSections;
-  let candidate: SEOPostV1 = { ...post, sections: post.sections.slice(0, sectionCount) };
-
-  if (constraints.minWords) {
-    while (countWords(candidate) < constraints.minWords && sectionCount < post.sections.length) {
-      sectionCount++;
-      candidate = { ...post, sections: post.sections.slice(0, sectionCount) };
-    }
-  }
-
-  return candidate;
-}
-
-/**
- * Word count is a soft prompt target, not something we can truncate without
- * mangling prose — so instead of silently returning content that blew past
- * the requested length, or spending a second AI call on a retry, we reject
- * outright once the model is egregiously (50%+) over budget. Reasonable
- * variance is allowed; only a clearly broken generation is rejected.
- */
-export function assertWordCountWithinTolerance(
-  words: number,
-  constraints: GenerateRequestV1["constraints"]
-): void {
-  const overBudget = words > constraints.maxWords * 1.5;
-  const underBudget = Boolean(constraints.minWords) && words < constraints.minWords! * 0.5;
-  if (overBudget || underBudget) {
-    throw new ApiError(
-      "INTERNAL_ERROR",
-      `Generated content did not meet the requested length constraints: got ${words} words, requested ${constraints.minWords ?? "no minimum"}–${constraints.maxWords} words. Please try again.`,
-      { actualWords: words, minWords: constraints.minWords ?? null, maxWords: constraints.maxWords }
-    );
-  }
+  return { ...post, sections: post.sections.slice(0, constraints.maxSections) };
 }
 
 function escapeHtml(text: string): string {

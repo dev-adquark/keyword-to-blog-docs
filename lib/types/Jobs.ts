@@ -24,7 +24,7 @@ export interface JobV1 {
   inputSummary: {
     keywords: string[];
     language: string;
-    maxWords: number;
+    maxWords?: number;
   };
   result?: SEOPostV1;
   rendered?: {
