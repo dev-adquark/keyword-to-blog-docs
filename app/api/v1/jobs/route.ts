@@ -69,17 +69,9 @@ export async function POST(req: Request) {
     }
     const input = parsed.data;
 
-    if (input.generateRequest.constraints.maxWords !== undefined && input.generateRequest.constraints.maxWords > context.plan.maxWordsPerRequest) {
-      throw new ApiError(
-        "VALIDATION_ERROR",
-        `constraints.maxWords exceeds the plan limit of ${context.plan.maxWordsPerRequest} words per request.`,
-        {
-          field: "generateRequest.constraints.maxWords",
-          maxAllowed: context.plan.maxWordsPerRequest,
-          received: input.generateRequest.constraints.maxWords,
-        }
-      );
-    }
+    // No plan/tier-based word-count cap here — this engine does not enforce
+    // subscription/billing word limits. `constraints.maxWords`/`minWords`,
+    // if sent, pass through unused for validation purposes.
 
     // Idempotency: same atomic claim-then-replay pattern as /v1/generate —
     // a repeated Idempotency-Key with the same body returns the original

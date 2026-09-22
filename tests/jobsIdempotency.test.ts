@@ -80,7 +80,7 @@ describe("POST /v1/jobs idempotency", () => {
         requestId: "req_1",
         apiKey: { id: "key_1" } as never,
         customer: { id: "cus_1" } as never,
-        plan: { maxWordsPerRequest: 8000, maxConcurrentJobs: 1, id: "starter" } as never,
+        plan: { maxWordsPerRequest: 1500, maxConcurrentJobs: 1, id: "starter" } as never,
       },
       rateLimitHeaders: {},
     });
@@ -92,6 +92,21 @@ describe("POST /v1/jobs idempotency", () => {
     vi.mocked(getJobById).mockResolvedValue(fakeJobRow() as never);
 
     const res = await POST(jobsRequest({ ...validBody, idempotencyKey: "idem-key-1" }));
+
+    expect(res.status).toBe(202);
+    expect(createJobRow).toHaveBeenCalledTimes(1);
+  });
+
+  it("REGRESSION: this engine does not enforce a plan/tier-based word cap — a request explicitly asking for MORE words than the plan's maxWordsPerRequest still succeeds", async () => {
+    vi.mocked(claimIdempotencyRequest).mockResolvedValue({ claimed: true, existing: null });
+    vi.mocked(createJobRow).mockResolvedValue(fakeJobRow() as never);
+    vi.mocked(getJobById).mockResolvedValue(fakeJobRow() as never);
+
+    const body = {
+      generateRequest: { ...validBody.generateRequest, constraints: { maxWords: 5000 } }, // exceeds plan's 1500 cap on purpose
+      format: { responseTypes: ["json"] },
+    };
+    const res = await POST(jobsRequest(body));
 
     expect(res.status).toBe(202);
     expect(createJobRow).toHaveBeenCalledTimes(1);

@@ -25,7 +25,7 @@ export const PLANS: PlanConfig[] = [
     requestsPerMinute: 1,
     requestsPerDay: 3,
     monthlyRequests: 90,
-    maxWordsPerRequest: 800,
+    maxWordsPerRequest: 1500,
     monthlyWords: 20000,
     priorityProcessing: false,
     teamSeats: 1,

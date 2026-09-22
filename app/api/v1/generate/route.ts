@@ -46,17 +46,11 @@ export async function POST(req: Request) {
     }
     generateRequest = parsed.data;
 
-    if (generateRequest.constraints.maxWords !== undefined && generateRequest.constraints.maxWords > context.plan.maxWordsPerRequest) {
-      throw new ApiError(
-        "VALIDATION_ERROR",
-        `constraints.maxWords exceeds the plan limit of ${context.plan.maxWordsPerRequest} words per request.`,
-        {
-          field: "constraints.maxWords",
-          maxAllowed: context.plan.maxWordsPerRequest,
-          received: generateRequest.constraints.maxWords,
-        }
-      );
-    }
+    // No plan/tier-based word-count cap here — this engine does not enforce
+    // subscription/billing word limits. `constraints.maxWords`/`minWords`,
+    // if sent, pass through unused for validation purposes (see
+    // lib/server/postRender.ts — content length is never a blocking
+    // condition anywhere in the generation flow).
 
     // Idempotency: claim the key atomically before generation so concurrent identical
     // requests cannot both bill/trigger AI generation. Replays return the same stored response.

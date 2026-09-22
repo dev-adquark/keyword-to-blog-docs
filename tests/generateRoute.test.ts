@@ -68,7 +68,7 @@ function authContext() {
       requestId: "req_1",
       apiKey: { id: "key_1" } as never,
       customer: { id: "cus_1" } as never,
-      plan: { maxWordsPerRequest: 8000 } as never,
+      plan: { maxWordsPerRequest: 1500 } as never,
     },
     rateLimitHeaders: {},
   };
@@ -147,6 +147,33 @@ describe("POST /v1/generate — content quality pipeline wiring", () => {
     );
 
     expect(res.status).toBe(200);
+  });
+
+  it("REGRESSION: this engine does not enforce a plan/tier-based word cap at all — a request explicitly asking for MORE words than the plan's maxWordsPerRequest still succeeds", async () => {
+    vi.mocked(authenticate).mockResolvedValue({
+      ok: true,
+      context: {
+        requestId: "req_1",
+        apiKey: { id: "key_1" } as never,
+        customer: { id: "cus_1" } as never,
+        plan: { maxWordsPerRequest: 800 } as never,
+      },
+      rateLimitHeaders: {},
+    });
+    vi.mocked(runContentQualityPipeline).mockResolvedValue({ post: validPost, report: passingReport });
+
+    const res = await POST(
+      generateRequest({
+        keywords: ["strong password"],
+        language: "en",
+        tone: "professional",
+        constraints: { maxWords: 1500 }, // exceeds the plan cap on purpose
+        format: { responseTypes: ["json"] },
+      })
+    );
+
+    expect(res.status).toBe(200);
+    expect(runContentQualityPipeline).toHaveBeenCalledTimes(1);
   });
 
   it("records exactly ONE usage event per external request, regardless of internal repair", async () => {
