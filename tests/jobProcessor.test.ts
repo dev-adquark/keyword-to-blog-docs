@@ -125,7 +125,7 @@ describe("processJob", () => {
     await processJob("job_1");
 
     expect(recordUsageEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ success: true, posts: 1, words: 3 })
+      expect.objectContaining({ success: true, posts: 1, words: 5 })
     );
     expect(markJobSucceeded).toHaveBeenCalled();
     expect(createWebhookDeliveryRecord).toHaveBeenCalledWith(

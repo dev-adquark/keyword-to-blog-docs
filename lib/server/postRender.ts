@@ -8,12 +8,27 @@ import { ApiError } from "./apiErrors";
  * /v1/generate route and the async job processor — these must never drift.
  */
 
-/** Canonical word count — the same source used for both metering and constraint checks. */
+/** Canonical word count — the ONE function used for metering, constraint
+ * checks, and quality-report word counts alike, so they can never drift
+ * against each other. Counts every field that's actually published: each
+ * section's body text and callout text, the conclusion, and every FAQ
+ * question/answer. Deliberately excludes the title/headings/meta
+ * description — those aren't part of an article's requested word-count
+ * target in normal SEO practice. Must be called on the FINAL post — after
+ * section-limit enforcement, link/citation stripping, and any other
+ * post-render transform — never on a draft that's about to be truncated
+ * further, or the count won't reflect what's actually returned. */
 export function countWords(post: SEOPostV1): number {
-  return post.sections.reduce(
-    (sum, s) => sum + (s.contentMarkdown ?? "").split(/\s+/).filter(Boolean).length,
-    0
-  );
+  const texts: string[] = [];
+  for (const s of post.sections) {
+    if (s.contentMarkdown) texts.push(s.contentMarkdown);
+    if (s.callout?.text) texts.push(s.callout.text);
+  }
+  if (post.conclusion) texts.push(post.conclusion);
+  for (const f of post.faqs ?? []) {
+    texts.push(f.question, f.answer);
+  }
+  return texts.reduce((sum, t) => sum + t.split(/\s+/).filter(Boolean).length, 0);
 }
 
 const MARKDOWN_LINK_PATTERN = /\[([^\]]*)\]\((?:https?:\/\/|mailto:)[^\s)]+\)/gi;
@@ -91,8 +106,15 @@ export function stripSourceContent(post: SEOPostV1): SEOPostV1 {
 /**
  * Deterministically enforces `maxSections` by truncating (no extra AI
  * call — a retry would double the API cost for a structural constraint we
- * can safely satisfy ourselves). Word-count is checked separately via
- * `assertWordCountWithinTolerance` since prose can't be truncated safely.
+ * can safely satisfy ourselves). `maxSections` is a soft structural
+ * preference; `minWords` is a hard content-quality requirement, so
+ * truncation keeps growing past `maxSections` (up to the model's full
+ * output) rather than cutting away enough real prose to fail `minWords` —
+ * blindly truncating to the exact section count was the bug: a genuinely
+ * valid, long-enough generation could be cut down to fewer words than
+ * requested purely because of where the model happened to place its
+ * section breaks. Final word count is still checked separately via
+ * `assertWordCountWithinTolerance`.
  */
 export function enforceSectionConstraint(
   post: SEOPostV1,
@@ -101,7 +123,18 @@ export function enforceSectionConstraint(
   if (!constraints.maxSections || post.sections.length <= constraints.maxSections) {
     return post;
   }
-  return { ...post, sections: post.sections.slice(0, constraints.maxSections) };
+
+  let sectionCount = constraints.maxSections;
+  let candidate: SEOPostV1 = { ...post, sections: post.sections.slice(0, sectionCount) };
+
+  if (constraints.minWords) {
+    while (countWords(candidate) < constraints.minWords && sectionCount < post.sections.length) {
+      sectionCount++;
+      candidate = { ...post, sections: post.sections.slice(0, sectionCount) };
+    }
+  }
+
+  return candidate;
 }
 
 /**
@@ -120,7 +153,8 @@ export function assertWordCountWithinTolerance(
   if (overBudget || underBudget) {
     throw new ApiError(
       "INTERNAL_ERROR",
-      "Generated content did not meet the requested length constraints. Please try again."
+      `Generated content did not meet the requested length constraints: got ${words} words, requested ${constraints.minWords ?? "no minimum"}–${constraints.maxWords} words. Please try again.`,
+      { actualWords: words, minWords: constraints.minWords ?? null, maxWords: constraints.maxWords }
     );
   }
 }
