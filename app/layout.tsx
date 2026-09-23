@@ -4,6 +4,7 @@ import "./globals.css";
 import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { Analytics } from "@/components/Analytics";
+import { Analytics as VercelAnalytics } from "@vercel/analytics/next";
 import { SITE_URL as siteUrl } from "@/lib/siteUrl";
 
 const spaceGrotesk = Space_Grotesk({
@@ -54,6 +55,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         {children}
         <Footer />
         <Analytics />
+        <VercelAnalytics />
       </body>
     </html>
   );
